@@ -1,31 +1,32 @@
 import os
-import sys
-import json
 import sqlite3
+import sys
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
-import pytest
 import pandas as pd
+import pytest
+from pandas import DataFrame
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import menu
 import init_db
+import menu
 from database import get_or_create_variant
 
 
 @pytest.fixture
-def db_path():
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
-        path = f.name
+def db_path() -> Generator[str, None, None]:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path: str = f.name
     yield path
     os.unlink(path)
 
 
 @pytest.fixture
-def schema(db_path):
-    """Create schema in a temp DB and return cursor."""
+def schema(db_path: str) -> Generator[tuple[Any, Any], None, None]:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.executescript(init_db.SCHEMA)
@@ -34,133 +35,151 @@ def schema(db_path):
     conn.close()
 
 
-def test_schema_creation(db_path):
-    """Tables are created with correct columns."""
+def test_schema_creation(db_path: str) -> None:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.executescript(init_db.SCHEMA)
     conn.commit()
 
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-    tables = [r[0] for r in cursor.fetchall()]
-    assert tables == ['results', 'students', 'variants']
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+        " AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    )
+    tables: list[str] = [r[0] for r in cursor.fetchall()]
+    assert tables == ["results", "students", "variants"]
 
     conn.close()
 
 
-def test_get_or_create_variant_creates_new(schema):
-    """New variant is inserted and its id returned."""
+def test_get_or_create_variant_creates_new(schema: Any) -> None:
     conn, cursor = schema
-    vid = get_or_create_variant(cursor, 'test_variant', 12345)
+    vid = get_or_create_variant(cursor, "test_variant", 12345)
     assert vid is not None
-    cursor.execute('SELECT id, name, kim FROM variants WHERE id = ?', (vid,))
+    cursor.execute("SELECT id, name, kim FROM variants WHERE id = ?", (vid,))
     row = cursor.fetchone()
-    assert row[1] == 'test_variant'
+    assert row[1] == "test_variant"
     assert row[2] == 12345
 
 
-def test_get_or_create_variant_returns_existing(schema):
-    """Existing variant returns same id, no duplicate."""
+def test_get_or_create_variant_returns_existing(schema: Any) -> None:
     conn, cursor = schema
-    vid1 = get_or_create_variant(cursor, 'dupe', 999)
-    vid2 = get_or_create_variant(cursor, 'dupe', 999)
+    vid1 = get_or_create_variant(cursor, "dupe", 999)
+    vid2 = get_or_create_variant(cursor, "dupe", 999)
     assert vid1 == vid2
-    cursor.execute('SELECT COUNT(*) FROM variants')
+    cursor.execute("SELECT COUNT(*) FROM variants")
     assert cursor.fetchone()[0] == 1
 
 
-def test_insert_student(schema):
-    """Student with results can be inserted and queried."""
+def test_insert_student(schema: Any) -> None:
     conn, cursor = schema
-    vid = get_or_create_variant(cursor, 'variant_a', 111)
+    vid = get_or_create_variant(cursor, "variant_a", 111)
 
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO students (id, name, user_id, variant_id, primary_score, secondary_score)
         VALUES (?, ?, ?, ?, ?, ?)
-    ''', ('uuid-1', 'Alice', 'user1', vid, 15, 70))
+    """,
+        ("uuid-1", "Alice", "user1", vid, 15, 70),
+    )
 
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO results (student_id, key, score, answer, number, task_id)
         VALUES (?, ?, ?, ?, ?, ?)
-    ''', ('uuid-1', 'key1', 1, '42', 1, 100))
+    """,
+        ("uuid-1", "key1", 1, "42", 1, 100),
+    )
 
     conn.commit()
 
-    cursor.execute('SELECT name, primary_score FROM students WHERE id = ?', ('uuid-1',))
+    cursor.execute("SELECT name, primary_score FROM students WHERE id = ?", ("uuid-1",))
     row = cursor.fetchone()
-    assert row == ('Alice', 15)
+    assert row == ("Alice", 15)
 
-    cursor.execute('SELECT score, answer FROM results WHERE student_id = ?', ('uuid-1',))
+    cursor.execute("SELECT score, answer FROM results WHERE student_id = ?", ("uuid-1",))
     row = cursor.fetchone()
-    assert row == (1, '42')
+    assert row == (1, "42")
 
 
-def test_delete_variant_cascades(schema):
-    """Deleting a variant removes its students and results."""
+def test_delete_variant_cascades(schema: Any) -> None:
     conn, cursor = schema
-    vid = get_or_create_variant(cursor, 'to_delete', 222)
+    vid = get_or_create_variant(cursor, "to_delete", 222)
 
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES (?, ?, ?, ?, ?)
-    ''', ('del-1', 'Bob', vid, 10, 50))
-    cursor.execute('INSERT INTO results (student_id, key, score, number) VALUES (?, ?, ?, ?)',
-                   ('del-1', 'k1', 1, 1))
+    """,
+        ("del-1", "Bob", vid, 10, 50),
+    )
+    cursor.execute(
+        "INSERT INTO results (student_id, key, score, number) VALUES (?, ?, ?, ?)",
+        ("del-1", "k1", 1, 1),
+    )
     conn.commit()
 
-    cursor.execute('DELETE FROM results WHERE student_id IN '
-                   '(SELECT id FROM students WHERE variant_id = ?)', (vid,))
-    cursor.execute('DELETE FROM students WHERE variant_id = ?', (vid,))
-    cursor.execute('DELETE FROM variants WHERE id = ?', (vid,))
+    cursor.execute(
+        "DELETE FROM results WHERE student_id IN " "(SELECT id FROM students WHERE variant_id = ?)",
+        (vid,),
+    )
+    cursor.execute("DELETE FROM students WHERE variant_id = ?", (vid,))
+    cursor.execute("DELETE FROM variants WHERE id = ?", (vid,))
     conn.commit()
 
-    cursor.execute('SELECT COUNT(*) FROM variants')
+    cursor.execute("SELECT COUNT(*) FROM variants")
     assert cursor.fetchone()[0] == 0
-    cursor.execute('SELECT COUNT(*) FROM students')
+    cursor.execute("SELECT COUNT(*) FROM students")
     assert cursor.fetchone()[0] == 0
-    cursor.execute('SELECT COUNT(*) FROM results')
+    cursor.execute("SELECT COUNT(*) FROM results")
     assert cursor.fetchone()[0] == 0
 
 
-def test_rename_student_simple(schema):
-    """Renaming a student when target doesn't exist."""
+def test_rename_student_simple(schema: Any) -> None:
     conn, cursor = schema
-    vid = get_or_create_variant(cursor, 'v1', 1)
-    cursor.execute('''
+    vid = get_or_create_variant(cursor, "v1", 1)
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES (?, ?, ?, ?, ?)
-    ''', ('s1', 'OldName', vid, 8, 40))
+    """,
+        ("s1", "OldName", vid, 8, 40),
+    )
     conn.commit()
 
-    cursor.execute('UPDATE students SET name = ? WHERE name = ?', ('NewName', 'OldName'))
+    cursor.execute("UPDATE students SET name = ? WHERE name = ?", ("NewName", "OldName"))
     conn.commit()
 
-    cursor.execute('SELECT name FROM students WHERE id = ?', ('s1',))
-    assert cursor.fetchone()[0] == 'NewName'
+    cursor.execute("SELECT name FROM students WHERE id = ?", ("s1",))
+    assert cursor.fetchone()[0] == "NewName"
 
 
-def test_rename_student_merge_higher_score_wins(schema):
-    """When renaming to existing name, higher score is kept."""
+def test_rename_student_merge_higher_score_wins(schema: Any) -> None:
     conn, cursor = schema
-    vid = get_or_create_variant(cursor, 'v1', 1)
+    vid = get_or_create_variant(cursor, "v1", 1)
 
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('a1', 'Alex', ? , 5, 30), ('a2', 'Alex', ?, 10, 60)
-    ''', (vid, vid))
-    cursor.execute('''
+    """,
+        (vid, vid),
+    )
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('l1', 'Lesha', ?, 8, 45)
-    ''', (vid,))
+    """,
+        (vid,),
+    )
     conn.commit()
 
-    # Simulate rename: Lesha -> Alex
-    # Both have scores for v1. Alex best=10, Lesha best=8 -> keep Alex
-    cursor.execute('SELECT id, primary_score FROM students WHERE name = ? AND variant_id = ?',
-                   ('Lesha', vid))
+    cursor.execute(
+        "SELECT id, primary_score FROM students WHERE name = ? AND variant_id = ?", ("Lesha", vid)
+    )
     old_rows = cursor.fetchall()
-    cursor.execute('SELECT id, primary_score FROM students WHERE name = ? AND variant_id = ?',
-                   ('Alex', vid))
+    cursor.execute(
+        "SELECT id, primary_score FROM students WHERE name = ? AND variant_id = ?", ("Alex", vid)
+    )
     new_rows = cursor.fetchall()
 
     old_best = max(r[1] or 0 for r in old_rows)
@@ -172,113 +191,124 @@ def test_rename_student_merge_higher_score_wins(schema):
         loser_ids = [r[0] for r in old_rows]
 
     for sid in loser_ids:
-        cursor.execute('DELETE FROM results WHERE student_id = ?', (sid,))
-        cursor.execute('DELETE FROM students WHERE id = ?', (sid,))
+        cursor.execute("DELETE FROM results WHERE student_id = ?", (sid,))
+        cursor.execute("DELETE FROM students WHERE id = ?", (sid,))
 
-    cursor.execute('UPDATE students SET name = ? WHERE name = ?', ('Alex', 'Lesha'))
+    cursor.execute("UPDATE students SET name = ? WHERE name = ?", ("Alex", "Lesha"))
     conn.commit()
 
-    cursor.execute('SELECT name, primary_score FROM students ORDER BY primary_score DESC')
+    cursor.execute("SELECT name, primary_score FROM students ORDER BY primary_score DESC")
     rows = cursor.fetchall()
-    assert all(r[0] == 'Alex' for r in rows)
-    assert rows[0][1] == 10  # highest kept
+    assert all(r[0] == "Alex" for r in rows)
+    assert rows[0][1] == 10
 
 
-def test_pivot_table_no_data(schema):
-    """Empty student table produces empty pivot."""
+def test_pivot_table_no_data(schema: Any) -> None:
     conn, cursor = schema
-    students = pd.read_sql_query('''
+    students: DataFrame = pd.read_sql_query(
+        """
         SELECT s.name, v.name as variant_name,
                s.primary_score, s.secondary_score
         FROM students s JOIN variants v ON s.variant_id = v.id
-    ''', conn)
+    """,
+        conn,
+    )
     assert students.empty
 
 
-def test_pivot_table_with_data(schema):
-    """Pivot table returns correct shape and values."""
+def test_pivot_table_with_data(schema: Any) -> None:
     conn, cursor = schema
-    v1 = get_or_create_variant(cursor, 'variant_1', 1)
-    v2 = get_or_create_variant(cursor, 'variant_2', 2)
+    v1 = get_or_create_variant(cursor, "variant_1", 1)
+    v2 = get_or_create_variant(cursor, "variant_2", 2)
 
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES
             ('u1', 'Alice', ?, 15, 70),
             ('u2', 'Bob', ?, 10, 50),
             ('u3', 'Alice', ?, 18, 80)
-    ''', (v1, v1, v2))
+    """,
+        (v1, v1, v2),
+    )
     conn.commit()
 
-    students = pd.read_sql_query('''
+    students: DataFrame = pd.read_sql_query(
+        """
         SELECT s.name, v.name as variant_name, s.primary_score, s.secondary_score
         FROM students s JOIN variants v ON s.variant_id = v.id
-    ''', conn)
-
-    pivot = students.pivot_table(
-        index='name', columns='variant_name', values='primary_score',
-        aggfunc='max'
+    """,
+        conn,
     )
-    pivot = pivot.astype('Int64').map(lambda x: int(x) if pd.notna(x) else '-')
 
-    assert list(pivot.index) == ['Alice', 'Bob']
-    assert sorted(pivot.columns.tolist()) == ['variant_1', 'variant_2']
-    assert pivot.loc['Alice', 'variant_1'] == 15
-    assert pivot.loc['Alice', 'variant_2'] == 18
-    assert pivot.loc['Bob', 'variant_1'] == 10
+    pivot: DataFrame = students.pivot_table(
+        index="name", columns="variant_name", values="primary_score", aggfunc="max"
+    )
+    pivot = pivot.astype("Int64").map(lambda x: int(x) if pd.notna(x) else "-")
+
+    assert list(pivot.index) == ["Alice", "Bob"]
+    assert sorted(pivot.columns.tolist()) == ["variant_1", "variant_2"]
+    assert pivot.loc["Alice", "variant_1"] == 15
+    assert pivot.loc["Alice", "variant_2"] == 18
+    assert pivot.loc["Bob", "variant_1"] == 10
 
 
-def test_delete_nonexistent_student(schema):
-    """Deleting a non-existent student does nothing."""
+def test_delete_nonexistent_student(schema: Any) -> None:
     conn, cursor = schema
-    cursor.execute('DELETE FROM students WHERE name = ?', ('Ghost',))
+    cursor.execute("DELETE FROM students WHERE name = ?", ("Ghost",))
     conn.commit()
-    cursor.execute('SELECT COUNT(*) FROM students')
+    cursor.execute("SELECT COUNT(*) FROM students")
     assert cursor.fetchone()[0] == 0
 
 
-def test_rename_to_same_name(db_path):
-    """Renaming to the same name is a no-op."""
+def test_rename_to_same_name(db_path: str) -> None:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.executescript(init_db.SCHEMA)
 
-    vid = get_or_create_variant(cursor, 'v', 0)
-    cursor.execute('''
+    vid = get_or_create_variant(cursor, "v", 0)
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('x', 'Alice', ?, 5, 25)
-    ''', (vid,))
+    """,
+        (vid,),
+    )
     conn.commit()
 
-    cursor.execute('UPDATE students SET name = ? WHERE name = ?', ('Alice', 'Alice'))
+    cursor.execute("UPDATE students SET name = ? WHERE name = ?", ("Alice", "Alice"))
     conn.commit()
 
-    cursor.execute('SELECT COUNT(*) FROM students WHERE name = ?', ('Alice',))
+    cursor.execute("SELECT COUNT(*) FROM students WHERE name = ?", ("Alice",))
     assert cursor.fetchone()[0] == 1
     conn.close()
 
 
-def test_multiple_variants_same_student(schema):
-    """Same student can appear in multiple variants."""
+def test_multiple_variants_same_student(schema: Any) -> None:
     conn, cursor = schema
-    v1 = get_or_create_variant(cursor, 'math', 1)
-    v2 = get_or_create_variant(cursor, 'phys', 2)
+    v1 = get_or_create_variant(cursor, "math", 1)
+    v2 = get_or_create_variant(cursor, "phys", 2)
 
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('a1', 'Alice', ?, 12, 60), ('a2', 'Alice', ?, 15, 75)
-    ''', (v1, v2))
+    """,
+        (v1, v2),
+    )
     conn.commit()
 
-    cursor.execute('SELECT variant_id, primary_score FROM students WHERE name = ? ORDER BY variant_id', ('Alice',))
+    cursor.execute(
+        "SELECT variant_id, primary_score FROM students WHERE name = ? ORDER BY variant_id",
+        ("Alice",),
+    )
     rows = cursor.fetchall()
     assert len(rows) == 2
     assert rows[0] == (v1, 12)
     assert rows[1] == (v2, 15)
 
 
-def test_foreign_key_integrity(db_path):
-    """Inserting a student with invalid variant_id fails."""
+def test_foreign_key_integrity(db_path: str) -> None:
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON")
     cursor = conn.cursor()
@@ -286,33 +316,36 @@ def test_foreign_key_integrity(db_path):
     conn.commit()
 
     with pytest.raises(sqlite3.IntegrityError):
-        cursor.execute('''
+        cursor.execute("""
             INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
             VALUES ('bad', 'Ghost', 999, 0, 0)
-        ''')
+        """)
         conn.commit()
 
     conn.close()
 
 
-def test_pdf_export_creates_file(db_path, monkeypatch):
-    """PDF export creates a file when data exists."""
+def test_pdf_export_creates_file(db_path: str, monkeypatch: Any) -> None:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.executescript(init_db.SCHEMA)
-    get_or_create_variant(cursor, 'test_pdf', 1)
-    cursor.execute('''
+    get_or_create_variant(cursor, "test_pdf", 1)
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('p1', 'Alice', ?, 10, 50)
-    ''', (1,))
+    """,
+        (1,),
+    )
     conn.commit()
     conn.close()
 
     import database
-    monkeypatch.setattr(database, 'DB_PATH', db_path)
-    monkeypatch.setattr('builtins.input', lambda _='': '1')
 
-    pdf_path = os.path.join(database.FILES_DIR, 'results.pdf')
+    monkeypatch.setattr(database, "DB_PATH", db_path)
+    monkeypatch.setattr("builtins.input", lambda _="": "1")
+
+    pdf_path: str = os.path.join(database.FILES_DIR, "results.pdf")
     if os.path.exists(pdf_path):
         os.remove(pdf_path)
 
@@ -320,110 +353,127 @@ def test_pdf_export_creates_file(db_path, monkeypatch):
     assert os.path.exists(pdf_path)
 
 
-def test_get_or_create_variant_kim_none(schema):
-    """get_or_create_variant works when kim is None."""
+def test_get_or_create_variant_kim_none(schema: Any) -> None:
     conn, cursor = schema
-    vid = get_or_create_variant(cursor, 'no_kim', None)
-    cursor.execute('SELECT kim FROM variants WHERE id = ?', (vid,))
+    vid = get_or_create_variant(cursor, "no_kim", None)
+    cursor.execute("SELECT kim FROM variants WHERE id = ?", (vid,))
     assert cursor.fetchone()[0] is None
 
 
-def test_task_stats_query(schema):
-    """Task statistics grouped by number returns correct rates."""
+def test_task_stats_query(schema: Any) -> None:
     conn, cursor = schema
-    v1 = get_or_create_variant(cursor, 'v1', 1)
-    v2 = get_or_create_variant(cursor, 'v2', 1)
+    v1 = get_or_create_variant(cursor, "v1", 1)
+    get_or_create_variant(cursor, "v2", 1)
 
-    # Student 1 with 2 tasks
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('s1', 'Alice', ?, 2, 50)
-    ''', (v1,))
-    cursor.executemany('''
+    """,
+        (v1,),
+    )
+    cursor.executemany(
+        """
         INSERT INTO results (student_id, key, score, number, task_id)
         VALUES (?, ?, ?, ?, ?)
-    ''', [
-        ('s1', 'k1', 1, 1, 101),
-        ('s1', 'k2', 1, 2, 102),
-        ('s1', 'k3', 0, 3, 103),
-        ('s1', 'k4', 0, 3, 104),
-    ])
+    """,
+        [
+            ("s1", "k1", 1, 1, 101),
+            ("s1", "k2", 1, 2, 102),
+            ("s1", "k3", 0, 3, 103),
+            ("s1", "k4", 0, 3, 104),
+        ],
+    )
     conn.commit()
 
-    df = pd.read_sql_query('''
+    df: DataFrame = pd.read_sql_query(
+        """
         SELECT r.number as task_number,
                ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
         FROM results r
         GROUP BY r.number
         ORDER BY r.number
-    ''', conn)
+    """,
+        conn,
+    )
 
     assert len(df) == 3
-    assert df[df['task_number'] == 1]['solve_rate'].iloc[0] == 100.0
-    assert df[df['task_number'] == 2]['solve_rate'].iloc[0] == 100.0
-    assert df[df['task_number'] == 3]['solve_rate'].iloc[0] == 0.0
+    assert df[df["task_number"] == 1]["solve_rate"].iloc[0] == 100.0
+    assert df[df["task_number"] == 2]["solve_rate"].iloc[0] == 100.0
+    assert df[df["task_number"] == 3]["solve_rate"].iloc[0] == 0.0
 
     conn.close()
 
 
-def test_student_avg_query(schema):
-    """Average scores per student are calculated correctly."""
+def test_student_avg_query(schema: Any) -> None:
     conn, cursor = schema
-    v1 = get_or_create_variant(cursor, 'v1', 1)
-    v2 = get_or_create_variant(cursor, 'v2', 1)
+    v1 = get_or_create_variant(cursor, "v1", 1)
+    v2 = get_or_create_variant(cursor, "v2", 1)
 
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES
             ('a1', 'Alice', ?, 10, 50),
             ('a2', 'Alice', ?, 20, 80),
             ('b1', 'Bob', ?, 15, 60)
-    ''', (v1, v2, v1))
+    """,
+        (v1, v2, v1),
+    )
     conn.commit()
 
-    df = pd.read_sql_query('''
+    df: DataFrame = pd.read_sql_query(
+        """
         SELECT s.name,
                ROUND(AVG(s.primary_score), 1) as avg_primary,
                COUNT(*) as tests_count
         FROM students s
         GROUP BY s.name
         ORDER BY s.name
-    ''', conn)
+    """,
+        conn,
+    )
 
     assert len(df) == 2
-    alice = df[df['name'] == 'Alice'].iloc[0]
-    assert alice['avg_primary'] == 15.0
-    assert alice['tests_count'] == 2
+    alice = df[df["name"] == "Alice"].iloc[0]
+    assert alice["avg_primary"] == 15.0
+    assert alice["tests_count"] == 2
 
-    bob = df[df['name'] == 'Bob'].iloc[0]
-    assert bob['avg_primary'] == 15.0
-    assert bob['tests_count'] == 1
+    bob = df[df["name"] == "Bob"].iloc[0]
+    assert bob["avg_primary"] == 15.0
+    assert bob["tests_count"] == 1
 
     conn.close()
 
 
-def test_student_task_analysis_query(schema):
-    """Per-student task analysis returns only that student's data."""
+def test_student_task_analysis_query(schema: Any) -> None:
     conn, cursor = schema
-    vid = get_or_create_variant(cursor, 'v1', 1)
+    vid = get_or_create_variant(cursor, "v1", 1)
 
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('s1', 'Alice', ?, 2, 50), ('s2', 'Bob', ?, 1, 25)
-    ''', (vid, vid))
+    """,
+        (vid, vid),
+    )
 
-    cursor.executemany('''
+    cursor.executemany(
+        """
         INSERT INTO results (student_id, key, score, number, task_id)
         VALUES (?, ?, ?, ?, ?)
-    ''', [
-        ('s1', 'k1', 1, 1, 101),
-        ('s1', 'k2', 0, 2, 102),
-        ('s2', 'k3', 1, 1, 101),
-        ('s2', 'k4', 0, 2, 102),
-    ])
+    """,
+        [
+            ("s1", "k1", 1, 1, 101),
+            ("s1", "k2", 0, 2, 102),
+            ("s2", "k3", 1, 1, 101),
+            ("s2", "k4", 0, 2, 102),
+        ],
+    )
     conn.commit()
 
-    df = pd.read_sql_query('''
+    df: DataFrame = pd.read_sql_query(
+        """
         SELECT r.number as task_number,
                ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
         FROM results r
@@ -431,98 +481,116 @@ def test_student_task_analysis_query(schema):
         WHERE s.name = ?
         GROUP BY r.number
         ORDER BY r.number
-    ''', conn, params=('Alice',))
+    """,
+        conn,
+        params=("Alice",),
+    )
 
     assert len(df) == 2
-    assert df[df['task_number'] == 1]['solve_rate'].iloc[0] == 100.0
-    assert df[df['task_number'] == 2]['solve_rate'].iloc[0] == 0.0
+    assert df[df["task_number"] == 1]["solve_rate"].iloc[0] == 100.0
+    assert df[df["task_number"] == 2]["solve_rate"].iloc[0] == 0.0
 
     conn.close()
 
 
-def test_task_stats_empty(schema):
-    """Task stats on empty results returns empty DataFrame."""
+def test_task_stats_empty(schema: Any) -> None:
     conn, cursor = schema
-    df = pd.read_sql_query('''
+    df: DataFrame = pd.read_sql_query(
+        """
         SELECT r.number as task_number,
                ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
         FROM results r
         GROUP BY r.number
-    ''', conn)
+    """,
+        conn,
+    )
     assert df.empty
     conn.close()
 
 
-def test_chart_task_stats_creates_file(schema):
-    """Chart for task stats produces a PNG file."""
+def test_chart_task_stats_creates_file(schema: Any) -> None:
     import matplotlib
-    matplotlib.use('Agg')
+
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     conn, cursor = schema
-    vid = get_or_create_variant(cursor, 'v1', 1)
-    cursor.execute('''
+    vid = get_or_create_variant(cursor, "v1", 1)
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('s1', 'Alice', ?, 2, 50)
-    ''', (vid,))
-    cursor.executemany('''
+    """,
+        (vid,),
+    )
+    cursor.executemany(
+        """
         INSERT INTO results (student_id, key, score, number, task_id)
         VALUES (?, ?, ?, ?, ?)
-    ''', [
-        ('s1', 'k1', 1, 1, 101),
-        ('s1', 'k2', 0, 2, 102),
-    ])
+    """,
+        [
+            ("s1", "k1", 1, 1, 101),
+            ("s1", "k2", 0, 2, 102),
+        ],
+    )
     conn.commit()
 
-    stats = pd.read_sql_query('''
+    stats: DataFrame = pd.read_sql_query(
+        """
         SELECT r.number as task_number,
                ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
         FROM results r
         GROUP BY r.number
         ORDER BY r.number
-    ''', conn)
+    """,
+        conn,
+    )
     conn.close()
     assert not stats.empty
 
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
-        temp_path = f.name
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        temp_path: str = f.name
 
     fig, ax = plt.subplots()
-    ax.bar(stats['task_number'], stats['solve_rate'])
+    ax.bar(stats["task_number"], stats["solve_rate"])
     fig.savefig(temp_path, dpi=50)
     plt.close(fig)
     assert os.path.getsize(temp_path) > 0
     os.unlink(temp_path)
 
 
-def test_chart_student_avg_creates_file(schema):
-    """Chart for student averages produces a PNG file."""
+def test_chart_student_avg_creates_file(schema: Any) -> None:
     import matplotlib
-    matplotlib.use('Agg')
+
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     conn, cursor = schema
-    vid = get_or_create_variant(cursor, 'v1', 1)
-    cursor.execute('''
+    vid = get_or_create_variant(cursor, "v1", 1)
+    cursor.execute(
+        """
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('s1', 'Alice', ?, 10, 50), ('s2', 'Bob', ?, 20, 80)
-    ''', (vid, vid))
+    """,
+        (vid, vid),
+    )
     conn.commit()
 
-    avg = pd.read_sql_query('''
+    avg: DataFrame = pd.read_sql_query(
+        """
         SELECT s.name, ROUND(AVG(s.primary_score), 1) as avg_primary
         FROM students s
         GROUP BY s.name
-    ''', conn)
+    """,
+        conn,
+    )
     conn.close()
 
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
-        temp_path = f.name
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        temp_path: str = f.name
 
     fig, ax = plt.subplots()
-    ax.barh(avg['name'], avg['avg_primary'])
+    ax.barh(avg["name"], avg["avg_primary"])
     fig.savefig(temp_path, dpi=50)
     plt.close(fig)
     assert os.path.getsize(temp_path) > 0

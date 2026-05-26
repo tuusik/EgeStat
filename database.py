@@ -3,40 +3,44 @@ import logging
 import os
 import re
 import sqlite3
+from typing import Any, Optional
 
 import pandas as pd
 
+from pandas import DataFrame
+
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join(os.getcwd(), 'ege_stat.db')
-FILES_DIR = os.path.join(os.getcwd(), 'files')
+DB_PATH: str = os.path.join(os.getcwd(), 'ege_stat.db')
+FILES_DIR: str = os.path.join(os.getcwd(), 'files')
 
-ORDER_COLUMNS = {'avg_primary', 'avg_secondary'}
+ORDER_COLUMNS: set[str] = {'avg_primary', 'avg_secondary'}
 
 
 class Database:
-    def __init__(self, db_path=None):
-        self.db_path = db_path or DB_PATH
-        self.conn = None
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        self.db_path: str = db_path or DB_PATH
+        self.conn: Optional[sqlite3.Connection] = None
 
-    def __enter__(self):
+    def __enter__(self) -> 'Database':
         self.conn = sqlite3.connect(self.db_path)
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any) -> None:
         if self.conn:
             self.conn.close()
             self.conn = None
 
-    def cursor(self):
+    def cursor(self) -> sqlite3.Cursor:
+        assert self.conn is not None
         return self.conn.cursor()
 
-    def commit(self):
+    def commit(self) -> None:
+        assert self.conn is not None
         self.conn.commit()
 
-    # ---- queries ----
-
-    def get_students_pivot_data(self):
+    def get_students_pivot_data(self) -> DataFrame:
+        assert self.conn is not None
         return pd.read_sql_query('''
             SELECT s.name, v.name as variant_name,
                    s.primary_score, s.secondary_score
@@ -44,24 +48,27 @@ class Database:
             JOIN variants v ON s.variant_id = v.id
         ''', self.conn)
 
-    def get_variants(self):
+    def get_variants(self) -> DataFrame:
+        assert self.conn is not None
         return pd.read_sql_query(
             'SELECT id, name FROM variants ORDER BY name', self.conn
         )
 
-    def get_student_names(self):
+    def get_student_names(self) -> DataFrame:
+        assert self.conn is not None
         return pd.read_sql_query(
             'SELECT DISTINCT name FROM students ORDER BY name', self.conn
         )
 
-    def get_existing_variant_names(self):
+    def get_existing_variant_names(self) -> set[str]:
         cursor = self.cursor()
         cursor.execute('SELECT name FROM variants')
-        names = {r[0] for r in cursor.fetchall()}
+        names: set[str] = {r[0] for r in cursor.fetchall()}
         logger.debug("get_existing_variant_names: %d names", len(names))
         return names
 
-    def get_task_stats(self):
+    def get_task_stats(self) -> DataFrame:
+        assert self.conn is not None
         return pd.read_sql_query('''
             SELECT r.number as task_number,
                    ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
@@ -70,9 +77,10 @@ class Database:
             ORDER BY r.number ASC
         ''', self.conn)
 
-    def get_student_avg(self, order_col='avg_primary'):
+    def get_student_avg(self, order_col: str = 'avg_primary') -> DataFrame:
         if order_col not in ORDER_COLUMNS:
             order_col = 'avg_primary'
+        assert self.conn is not None
         return pd.read_sql_query(f'''
             SELECT s.name,
                    ROUND(AVG(s.primary_score), 1) as avg_primary,
@@ -83,7 +91,8 @@ class Database:
             ORDER BY {order_col} DESC
         ''', self.conn)
 
-    def get_student_task_analysis(self, name):
+    def get_student_task_analysis(self, name: str) -> DataFrame:
+        assert self.conn is not None
         return pd.read_sql_query('''
             SELECT r.number as task_number,
                    ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
@@ -94,7 +103,7 @@ class Database:
             ORDER BY r.number ASC
         ''', self.conn, params=(name,))
 
-    def delete_variant(self, variant_id):
+    def delete_variant(self, variant_id: int) -> None:
         cursor = self.cursor()
         cursor.execute(
             'DELETE FROM results WHERE student_id IN '
@@ -105,7 +114,7 @@ class Database:
         cursor.execute('DELETE FROM variants WHERE id = ?', (variant_id,))
         logger.info("Deleted variant id=%d", variant_id)
 
-    def delete_student(self, name):
+    def delete_student(self, name: str) -> None:
         cursor = self.cursor()
         cursor.execute(
             'DELETE FROM results WHERE student_id IN '
@@ -115,18 +124,18 @@ class Database:
         cursor.execute('DELETE FROM students WHERE name = ?', (name,))
         logger.info("Deleted student '%s'", name)
 
-    def target_name_exists(self, name):
+    def target_name_exists(self, name: str) -> bool:
         cursor = self.cursor()
         cursor.execute('SELECT COUNT(*) FROM students WHERE name = ?', (name,))
         row = cursor.fetchone()
         return row is not None and row[0] > 0
 
-    def get_student_variants(self, name):
+    def get_student_variants(self, name: str) -> set[int]:
         cursor = self.cursor()
         cursor.execute('SELECT DISTINCT variant_id FROM students WHERE name = ?', (name,))
         return {r[0] for r in cursor.fetchall()}
 
-    def get_student_scores_by_variant(self, name, variant_id):
+    def get_student_scores_by_variant(self, name: str, variant_id: int) -> list[Any]:
         cursor = self.cursor()
         cursor.execute(
             'SELECT id, primary_score FROM students WHERE name = ? AND variant_id = ?',
@@ -134,37 +143,38 @@ class Database:
         )
         return cursor.fetchall()
 
-    def delete_student_by_ids(self, ids):
+    def delete_student_by_ids(self, ids: list[Any]) -> None:
         cursor = self.cursor()
         for sid in ids:
             cursor.execute('DELETE FROM results WHERE student_id = ?', (sid,))
             cursor.execute('DELETE FROM students WHERE id = ?', (sid,))
 
-    def rename_student_simple(self, old_name, new_name):
+    def rename_student_simple(self, old_name: str, new_name: str) -> None:
         cursor = self.cursor()
         cursor.execute('UPDATE students SET name = ? WHERE name = ?', (new_name, old_name))
         logger.info("Renamed student '%s' -> '%s'", old_name, new_name)
 
-    def rename_variant(self, variant_id, new_name):
+    def rename_variant(self, variant_id: int, new_name: str) -> None:
         cursor = self.cursor()
         cursor.execute('UPDATE variants SET name = ? WHERE id = ?', (new_name, variant_id))
         logger.info("Renamed variant id=%d -> '%s'", variant_id, new_name)
 
-    def get_or_create_variant(self, name, kim):
+    def get_or_create_variant(self, name: str, kim: Optional[int]) -> int:
         cursor = self.cursor()
         cursor.execute('SELECT id FROM variants WHERE name = ?', (name,))
         row = cursor.fetchone()
         if row:
-            return row[0]
+            return int(row[0])
         cursor.execute(
             'INSERT INTO variants (name, kim) VALUES (?, ?)',
             (name, kim)
         )
         vid = cursor.lastrowid
+        assert vid is not None
         logger.debug("Created variant id=%d name='%s'", vid, name)
         return vid
 
-    def insert_student(self, rec, variant_id):
+    def insert_student(self, rec: dict[str, Any], variant_id: int) -> None:
         cursor = self.cursor()
         cursor.execute('''
             INSERT OR IGNORE INTO students
@@ -179,7 +189,7 @@ class Database:
             rec.get('createdAt'), rec.get('updatedAt')
         ))
 
-    def insert_result(self, student_id, r):
+    def insert_result(self, student_id: str, r: dict[str, Any]) -> None:
         cursor = self.cursor()
         cursor.execute('''
             INSERT INTO results
@@ -190,15 +200,15 @@ class Database:
             r.get('answer'), r.get('number'), r.get('taskId')
         ))
 
-    def load_json_file(self, filename, variant_name):
+    def load_json_file(self, filename: str, variant_name: str) -> int:
         filepath = os.path.join(FILES_DIR, filename)
         with open(filepath, 'r', encoding='utf-8') as f:
-            records = json.load(f)
+            records: list[dict[str, Any]] = json.load(f)
 
         if not records:
             return 0
 
-        kim = records[0].get('kim')
+        kim: Optional[int] = records[0].get('kim')
         variant_id = self.get_or_create_variant(variant_name, kim)
 
         for rec in records:
@@ -210,15 +220,16 @@ class Database:
         return len(records)
 
 
-def get_or_create_variant(cursor, name, kim):
+def get_or_create_variant(cursor: sqlite3.Cursor, name: str, kim: Optional[int]) -> int:
     cursor.execute('SELECT id FROM variants WHERE name = ?', (name,))
     row = cursor.fetchone()
     if row:
-        return row[0]
+        return int(row[0])
     cursor.execute(
         'INSERT INTO variants (name, kim) VALUES (?, ?)',
         (name, kim)
     )
     vid = cursor.lastrowid
+    assert vid is not None
     logger.debug("Created variant id=%d name='%s'", vid, name)
     return vid

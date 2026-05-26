@@ -71,9 +71,15 @@ python3 menu.py
 
 **1 — Решаемость по заданиям** — столбчатая диаграмма % решаемости по каждому номеру.
 
+![Task Stats](https://raw.githubusercontent.com/tuusik/EgeStat/main/screenshots/chart_task_stats.png)
+
 **2 — Средний балл учеников** — горизонтальная диаграмма, с выбором первичных/вторичных баллов.
 
+![Student Avg](https://raw.githubusercontent.com/tuusik/EgeStat/main/screenshots/chart_student_avg.png)
+
 **3 — Анализ заданий ученика** — столбчатая диаграмма для выбранного ученика.
+
+![Student Tasks](https://raw.githubusercontent.com/tuusik/EgeStat/main/screenshots/chart_student_tasks.png)
 
 
 ---

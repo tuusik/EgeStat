@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import re
@@ -10,7 +9,7 @@ from database import Database, DB_PATH, FILES_DIR
 
 logger = logging.getLogger(__name__)
 
-SCHEMA = '''
+SCHEMA: str = '''
     CREATE TABLE IF NOT EXISTS variants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
@@ -44,7 +43,7 @@ SCHEMA = '''
 '''
 
 
-def init_db():
+def init_db() -> None:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.executescript(SCHEMA)
@@ -52,7 +51,7 @@ def init_db():
     conn.close()
 
 
-def main():
+def main() -> None:
     init_db()
 
     db = Database()
@@ -62,15 +61,15 @@ def main():
             print("База уже содержит данные. Используй пункт меню «Загрузить новые файлы».")
             return
 
-    json_files = sorted(
+    json_files: list[str] = sorted(
         f for f in os.listdir(FILES_DIR) if f.endswith('.json')
     )
 
-    total = 0
+    total: int = 0
     for filename in tqdm(json_files, desc="Загрузка в БД", unit="файл"):
         db = Database()
         with db:
-            count = db.load_json_file(filename, re.sub(r'\.json$', '', filename))
+            count: int = db.load_json_file(filename, re.sub(r'\.json$', '', filename))
         total += count
 
     print(f'Загружено {total} студентов из {len(json_files)} вариантов.')
