@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -6,6 +7,8 @@ import sqlite3
 from tqdm import tqdm
 
 from database import Database, DB_PATH, FILES_DIR
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = '''
     CREATE TABLE IF NOT EXISTS variants (

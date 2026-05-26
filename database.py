@@ -1,9 +1,12 @@
 import json
+import logging
 import os
 import re
 import sqlite3
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(os.getcwd(), 'ege_stat.db')
 FILES_DIR = os.path.join(os.getcwd(), 'files')
@@ -55,6 +58,7 @@ class Database:
         cursor = self.cursor()
         cursor.execute('SELECT name FROM variants')
         names = {r[0] for r in cursor.fetchall()}
+        logger.debug("get_existing_variant_names: %d names", len(names))
         return names
 
     def get_task_stats(self):
@@ -99,6 +103,7 @@ class Database:
         )
         cursor.execute('DELETE FROM students WHERE variant_id = ?', (variant_id,))
         cursor.execute('DELETE FROM variants WHERE id = ?', (variant_id,))
+        logger.info("Deleted variant id=%d", variant_id)
 
     def delete_student(self, name):
         cursor = self.cursor()
@@ -108,6 +113,7 @@ class Database:
             (name,)
         )
         cursor.execute('DELETE FROM students WHERE name = ?', (name,))
+        logger.info("Deleted student '%s'", name)
 
     def target_name_exists(self, name):
         cursor = self.cursor()
@@ -137,10 +143,12 @@ class Database:
     def rename_student_simple(self, old_name, new_name):
         cursor = self.cursor()
         cursor.execute('UPDATE students SET name = ? WHERE name = ?', (new_name, old_name))
+        logger.info("Renamed student '%s' -> '%s'", old_name, new_name)
 
     def rename_variant(self, variant_id, new_name):
         cursor = self.cursor()
         cursor.execute('UPDATE variants SET name = ? WHERE id = ?', (new_name, variant_id))
+        logger.info("Renamed variant id=%d -> '%s'", variant_id, new_name)
 
     def get_or_create_variant(self, name, kim):
         cursor = self.cursor()
@@ -152,7 +160,9 @@ class Database:
             'INSERT INTO variants (name, kim) VALUES (?, ?)',
             (name, kim)
         )
-        return cursor.lastrowid
+        vid = cursor.lastrowid
+        logger.debug("Created variant id=%d name='%s'", vid, name)
+        return vid
 
     def insert_student(self, rec, variant_id):
         cursor = self.cursor()
@@ -209,4 +219,6 @@ def get_or_create_variant(cursor, name, kim):
         'INSERT INTO variants (name, kim) VALUES (?, ?)',
         (name, kim)
     )
-    return cursor.lastrowid
+    vid = cursor.lastrowid
+    logger.debug("Created variant id=%d name='%s'", vid, name)
+    return vid

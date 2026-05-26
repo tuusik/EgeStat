@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import time
@@ -9,6 +10,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 DOWNLOAD_DIR = os.path.join(os.getcwd(), 'files')
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -41,7 +44,7 @@ def retry_on_error(func, *args, **kwargs):
         except WebDriverException as e:
             if attempt == MAX_RETRIES:
                 raise
-            print(f"Ошибка (попытка {attempt}/{MAX_RETRIES}): {e}")
+            logger.warning("Ошибка (попытка %d/%d): %s", attempt, MAX_RETRIES, e)
             time.sleep(2)
     return None
 
@@ -112,6 +115,7 @@ try:
         filename = os.path.join(DOWNLOAD_DIR, f'{names[idx]}.json')
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(json_text)
+        logger.info("Сохранён %s", filename)
 
         driver.back()
         wait.until(EC.presence_of_element_located(

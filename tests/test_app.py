@@ -310,13 +310,17 @@ def test_pdf_export_creates_file(db_path, monkeypatch):
 
     import database
     monkeypatch.setattr(database, 'DB_PATH', db_path)
-    monkeypatch.setattr('builtins.input', lambda _='': '1')
 
     pdf_path = os.path.join(database.FILES_DIR, 'results.pdf')
     if os.path.exists(pdf_path):
         os.remove(pdf_path)
 
-    menu.export_pdf()
+    from click.testing import CliRunner
+    runner = CliRunner()
+    result = runner.invoke(menu.cli, ['export-pdf', '--score', 'primary'])
+    if result.exception:
+        raise result.exception
+    assert os.path.exists(pdf_path)
 
 
 def test_get_or_create_variant_kim_none(schema):

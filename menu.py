@@ -1,26 +1,36 @@
+import logging
 import os
 import re
 
+import click
 import pandas as pd
 from tabulate import tabulate
 from tqdm import tqdm
 
 from database import Database, FILES_DIR
 
+logger = logging.getLogger(__name__)
 
+
+@click.group()
+def cli():
+    pass
+
+
+@cli.command("show-results")
 def show_results():
     db = Database()
     with db:
         students = db.get_students_pivot_data()
 
     if students.empty:
-        print("Нет данных.")
+        click.echo("Нет данных.")
         return
 
-    print("\nФормат отображения:")
-    print("1) Первичные баллы")
-    print("2) Вторичные баллы")
-    choice = input("> ").strip()
+    click.echo("\nФормат отображения:")
+    click.echo("1) Первичные баллы")
+    click.echo("2) Вторичные баллы")
+    choice = click.prompt(">", type=click.Choice(['1', '2']))
 
     value_col = 'secondary_score' if choice == '2' else 'primary_score'
 
@@ -31,70 +41,51 @@ def show_results():
     pivot = pivot.astype('Int64').map(lambda x: int(x) if pd.notna(x) else '-')
 
     pivot.index.name = 'Имя'
-    print()
-    print(tabulate(pivot, headers='keys', tablefmt='grid'))
+    click.echo()
+    click.echo(tabulate(pivot, headers='keys', tablefmt='grid'))
 
 
-def delete_test():
+@cli.command("delete-test")
+@click.argument("test_id", type=int)
+def delete_test(test_id):
     db = Database()
     with db:
         variants = db.get_variants()
 
-    if variants.empty:
-        print("Нет тестов.")
+    if test_id not in variants['id'].values:
+        click.echo("Тест с таким ID не найден.")
         return
 
-    print("\nВыберите тест для удаления:")
-    for i, row in variants.iterrows():
-        print(f"{i + 1}) {row['name']}")
-    print("0) Отмена")
-
-    choice = input("> ").strip()
-    if not choice.isdigit():
-        return
-    idx = int(choice)
-    if idx == 0 or idx > len(variants):
-        return
-
-    variant = variants.iloc[idx - 1]
-    confirm = input(
-        f"Удалить тест «{variant['name']}» и все его результаты? (д/н): "
-    ).strip().lower()
-    if confirm != 'д':
-        return
+    name = variants[variants['id'] == test_id].iloc[0]['name']
+    click.confirm(f"Удалить тест «{name}» и все его результаты?", abort=True)
 
     with db:
-        db.delete_variant(int(variant['id']))
+        db.delete_variant(test_id)
         db.commit()
-    print(f"Тест «{variant['name']}» удалён.")
+    click.echo(f"Тест «{name}» удалён.")
 
 
-def rename_student():
+@cli.command("delete-student")
+@click.argument("name")
+def delete_student(name):
+    click.confirm(f"Удалить ученика «{name}» и все его результаты?", abort=True)
+
     db = Database()
     with db:
-        names = db.get_student_names()
+        db.delete_student(name)
+        db.commit()
+    click.echo(f"Ученик «{name}» удалён.")
 
-    if names.empty:
-        print("Нет учеников.")
+
+@cli.command("rename-student")
+@click.argument("old_name")
+@click.argument("new_name")
+def rename_student(old_name, new_name):
+    if old_name == new_name:
+        click.echo("Имена совпадают.")
         return
 
-    print("\nВыберите ученика для переименования:")
-    for i, row in names.iterrows():
-        print(f"{i + 1}) {row['name']}")
-    print("0) Отмена")
-
-    choice = input("> ").strip()
-    if not choice.isdigit():
-        return
-    idx = int(choice)
-    if idx == 0 or idx > len(names):
-        return
-
-    old_name = names.iloc[idx - 1]['name']
-    new_name = input(f"Новое имя для «{old_name}»: ").strip()
-    if not new_name or new_name == old_name:
-        return
-
+    db = Database()
     with db:
         if db.target_name_exists(new_name):
             old_variants = db.get_student_variants(old_name)
@@ -116,75 +107,29 @@ def rename_student():
 
         db.rename_student_simple(old_name, new_name)
         db.commit()
-    print(f"«{old_name}» переименован в «{new_name}».")
+    click.echo(f"«{old_name}» переименован в «{new_name}».")
 
 
-def rename_test():
+@cli.command("rename-test")
+@click.argument("test_id", type=int)
+@click.argument("new_name")
+def rename_test(test_id, new_name):
     db = Database()
     with db:
         variants = db.get_variants()
-
-    if variants.empty:
-        print("Нет тестов.")
-        return
-
-    print("\nВыберите тест для переименования:")
-    for i, row in variants.iterrows():
-        print(f"{i + 1}) {row['name']}")
-    print("0) Отмена")
-
-    choice = input("> ").strip()
-    if not choice.isdigit():
-        return
-    idx = int(choice)
-    if idx == 0 or idx > len(variants):
-        return
-
-    variant = variants.iloc[idx - 1]
-    new_name = input(f"Новое название для «{variant['name']}»: ").strip()
-    if not new_name or new_name == variant['name']:
-        return
-
-    with db:
-        db.rename_variant(int(variant['id']), new_name)
+        if test_id not in variants['id'].values:
+            click.echo("Тест с таким ID не найден.")
+            return
+        old_name = variants[variants['id'] == test_id].iloc[0]['name']
+        if new_name == old_name:
+            click.echo("Названия совпадают.")
+            return
+        db.rename_variant(test_id, new_name)
         db.commit()
-    print(f"Тест «{variant['name']}» переименован в «{new_name}».")
+    click.echo(f"Тест «{old_name}» переименован в «{new_name}».")
 
 
-def delete_student():
-    db = Database()
-    with db:
-        names = db.get_student_names()
-
-    if names.empty:
-        print("Нет учеников.")
-        return
-
-    print("\nВыберите ученика для удаления:")
-    for i, row in names.iterrows():
-        print(f"{i + 1}) {row['name']}")
-    print("0) Отмена")
-
-    choice = input("> ").strip()
-    if not choice.isdigit():
-        return
-    idx = int(choice)
-    if idx == 0 or idx > len(names):
-        return
-
-    name = names.iloc[idx - 1]['name']
-    confirm = input(
-        f"Удалить ученика «{name}» и все его результаты? (д/н): "
-    ).strip().lower()
-    if confirm != 'д':
-        return
-
-    with db:
-        db.delete_student(name)
-        db.commit()
-    print(f"Ученик «{name}» удалён.")
-
-
+@cli.command("load-files")
 def load_new_files():
     db = Database()
     with db:
@@ -196,7 +141,7 @@ def load_new_files():
     new_files = [f for f in json_files if re.sub(r'\.json$', '', f) not in existing]
 
     if not new_files:
-        print("Новых файлов нет.")
+        click.echo("Новых файлов нет.")
         return
 
     total = 0
@@ -206,10 +151,13 @@ def load_new_files():
             count = db.load_json_file(filename, variant_name)
         total += count
 
-    print(f"Загружено {len(new_files)} новых файлов.")
+    click.echo(f"Загружено {len(new_files)} новых файлов.")
 
 
-def export_pdf():
+@cli.command("export-pdf")
+@click.option("--score", type=click.Choice(['primary', 'secondary']), default='primary',
+              help="Тип баллов")
+def export_pdf(score):
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
     from reportlab.lib import colors
@@ -223,15 +171,10 @@ def export_pdf():
         students = db.get_students_pivot_data()
 
     if students.empty:
-        print("Нет данных.")
+        click.echo("Нет данных.")
         return
 
-    print("\nФормат экспорта:")
-    print("1) Первичные баллы")
-    print("2) Вторичные баллы")
-    choice = input("> ").strip()
-
-    value_col = 'secondary_score' if choice == '2' else 'primary_score'
+    value_col = 'secondary_score' if score == 'secondary' else 'primary_score'
 
     pivot = students.pivot_table(
         index='name', columns='variant_name', values=value_col,
@@ -282,140 +225,94 @@ def export_pdf():
 
     elems = [Paragraph("Результаты тестов", style_normal), Spacer(1, 5 * mm), table]
     doc.build(elems)
-    print(f"PDF сохранён: {pdf_path}")
+    click.echo(f"PDF сохранён: {pdf_path}")
 
 
-def task_stats():
+@cli.command("task-stats")
+@click.option("--sort", type=click.Choice(['number', 'rate-asc', 'rate-desc']),
+              default='number', help="Сортировка")
+def task_stats(sort):
     db = Database()
     with db:
         stats = db.get_task_stats()
 
     if stats.empty:
-        print("Нет данных.")
+        click.echo("Нет данных.")
         return
 
     stats = stats.astype({'task_number': int})
 
-    print("\nСортировать по:")
-    print("1) Номеру задания")
-    print("2) % решаемости (от худших к лучшим)")
-    print("3) % решаемости (от лучших к худшим)")
-    choice = input("> ").strip()
-
-    if choice == '2':
+    if sort == 'rate-asc':
         stats = stats.sort_values('solve_rate', ascending=True)
-    elif choice == '3':
+    elif sort == 'rate-desc':
         stats = stats.sort_values('solve_rate', ascending=False)
 
     stats.columns = ['№ задания', '% решаемости']
-    print()
-    print("Статистика по номерам заданий (все ученики):")
-    print(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
+    click.echo()
+    click.echo("Статистика по номерам заданий (все ученики):")
+    click.echo(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
 
 
+@cli.command("student-avg")
 def student_avg():
     db = Database()
     with db:
         avg = db.get_student_avg()
 
     if avg.empty:
-        print("Нет данных.")
+        click.echo("Нет данных.")
         return
 
-    print()
-    print("Средний балл учеников:")
+    click.echo()
+    click.echo("Средний балл учеников:")
     avg.columns = ['Имя', 'Ср. первичный', 'Ср. вторичный', 'Тестов']
-    print(tabulate(avg, headers='keys', tablefmt='grid', showindex=False))
+    click.echo(tabulate(avg, headers='keys', tablefmt='grid', showindex=False))
 
 
-def student_task_analysis():
+@cli.command("student-task-analysis")
+@click.argument("name")
+@click.option("--sort", type=click.Choice(['number', 'rate-asc', 'rate-desc']),
+              default='number', help="Сортировка")
+def student_task_analysis(name, sort):
     db = Database()
-    with db:
-        names = db.get_student_names()
-
-    if names.empty:
-        print("Нет учеников.")
-        return
-
-    print("\nВыберите ученика:")
-    for i, row in names.iterrows():
-        print(f"{i + 1}) {row['name']}")
-    print("0) Отмена")
-
-    choice = input("> ").strip()
-    if not choice.isdigit():
-        return
-    idx = int(choice)
-    if idx == 0 or idx > len(names):
-        return
-
-    name = names.iloc[idx - 1]['name']
-
     with db:
         stats = db.get_student_task_analysis(name)
 
     if stats.empty:
-        print(f"У ученика «{name}» нет данных о заданиях.")
+        click.echo(f"У ученика «{name}» нет данных о заданиях.")
         return
 
     stats = stats.astype({'task_number': int})
 
-    print("\nСортировать по:")
-    print("1) Номеру задания")
-    print("2) % решаемости (от худших к лучшим)")
-    print("3) % решаемости (от лучших к худшим)")
-    choice = input("> ").strip()
-
-    if choice == '2':
+    if sort == 'rate-asc':
         stats = stats.sort_values('solve_rate', ascending=True)
-    elif choice == '3':
+    elif sort == 'rate-desc':
         stats = stats.sort_values('solve_rate', ascending=False)
 
-    print(f"\nАнализ заданий для «{name}»:")
+    click.echo(f"\nАнализ заданий для «{name}»:")
     stats.columns = ['№ задания', '% решаемости']
-    print(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
+    click.echo(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
 
 
-def show_charts():
+# ---- Charts ----
+
+@cli.group()
+def chart():
+    pass
+
+
+@chart.command("task-stats")
+def chart_task_stats():
     import matplotlib
     import matplotlib.pyplot as plt
+    _setup_matplotlib(plt)
 
-    font_path = '/Library/Fonts/Arial Unicode.ttf'
-    if os.path.exists(font_path):
-        from matplotlib import font_manager
-        font_manager.fontManager.addfont(font_path)
-        plt.rcParams['font.family'] = font_manager.FontProperties(fname=font_path).get_name()
-    plt.rcParams['axes.unicode_minus'] = False
-
-    while True:
-        print()
-        print("--- ГРАФИКИ ---")
-        print("1) Решаемость по заданиям (все ученики)")
-        print("2) Средний балл учеников")
-        print("3) Анализ заданий конкретного ученика")
-        print("0) Назад")
-        choice = input("> ").strip()
-
-        if choice == '0':
-            plt.close('all')
-            return
-        elif choice == '1':
-            _chart_task_stats(plt)
-        elif choice == '2':
-            _chart_student_avg(plt)
-        elif choice == '3':
-            _chart_student_task_analysis(plt)
-        else:
-            print("Неверный выбор.")
-
-
-def _chart_task_stats(plt):
     db = Database()
     with db:
         stats = db.get_task_stats()
 
     if stats.empty:
-        print("Нет данных.")
+        click.echo("Нет данных.")
         return
 
     stats = stats.astype({'task_number': int})
@@ -438,20 +335,23 @@ def _chart_task_stats(plt):
     plt.close(fig)
 
 
-def _chart_student_avg(plt):
-    print("\nБаллы:")
-    print("1) Первичные")
-    print("2) Вторичные")
-    score_choice = input("> ").strip()
-    col = 'avg_secondary' if score_choice == '2' else 'avg_primary'
-    label = 'Вторичный' if score_choice == '2' else 'Первичный'
+@chart.command("student-avg")
+@click.option("--score", type=click.Choice(['primary', 'secondary']), default='primary',
+              help="Тип баллов")
+def chart_student_avg(score):
+    import matplotlib
+    import matplotlib.pyplot as plt
+    _setup_matplotlib(plt)
+
+    col = 'avg_secondary' if score == 'secondary' else 'avg_primary'
+    label = 'Вторичный' if score == 'secondary' else 'Первичный'
 
     db = Database()
     with db:
         avg = db.get_student_avg(col)
 
     if avg.empty:
-        print("Нет данных.")
+        click.echo("Нет данных.")
         return
 
     fig, ax = plt.subplots(figsize=(10, max(4, len(avg) * 0.4)))
@@ -471,34 +371,19 @@ def _chart_student_avg(plt):
     plt.close(fig)
 
 
-def _chart_student_task_analysis(plt):
+@chart.command("student-task-analysis")
+@click.argument("name")
+def chart_student_task_analysis(name):
+    import matplotlib
+    import matplotlib.pyplot as plt
+    _setup_matplotlib(plt)
+
     db = Database()
-    with db:
-        names = db.get_student_names()
-
-    if names.empty:
-        print("Нет учеников.")
-        return
-
-    print("\nВыберите ученика:")
-    for i, row in names.iterrows():
-        print(f"{i + 1}) {row['name']}")
-    print("0) Отмена")
-
-    choice = input("> ").strip()
-    if not choice.isdigit():
-        return
-    idx = int(choice)
-    if idx == 0 or idx > len(names):
-        return
-
-    name = names.iloc[idx - 1]['name']
-
     with db:
         stats = db.get_student_task_analysis(name)
 
     if stats.empty:
-        print(f"У ученика «{name}» нет данных о заданиях.")
+        click.echo(f"У ученика «{name}» нет данных о заданиях.")
         return
 
     stats = stats.astype({'task_number': int})
@@ -521,56 +406,49 @@ def _chart_student_task_analysis(plt):
     plt.close(fig)
 
 
-def main():
-    while True:
-        print()
-        print("=" * 40)
-        print("ГЛАВНОЕ МЕНЮ")
-        print("=" * 40)
-        print("1) Показать результаты за тесты")
-        print("2) Удалить тест")
-        print("3) Удалить ученика")
-        print("4) Переименовать ученика")
-        print("5) Переименовать тест")
-        print("6) Загрузить новые файлы")
-        print("7) Экспорт в PDF")
-        print("--- Аналитика ---")
-        print("8) Статистика по заданиям")
-        print("9) Средний балл учеников")
-        print("10) Анализ заданий ученика")
-        print("--- Графики ---")
-        print("11) Построить графики")
-        print("0) Выход")
+def _setup_matplotlib(plt):
+    font_path = '/Library/Fonts/Arial Unicode.ttf'
+    if os.path.exists(font_path):
+        from matplotlib import font_manager
+        font_manager.fontManager.addfont(font_path)
+        plt.rcParams['font.family'] = font_manager.FontProperties(fname=font_path).get_name()
+    plt.rcParams['axes.unicode_minus'] = False
 
-        choice = input("> ").strip()
 
-        if choice == '1':
-            show_results()
-        elif choice == '2':
-            delete_test()
-        elif choice == '3':
-            delete_student()
-        elif choice == '4':
-            rename_student()
-        elif choice == '5':
-            rename_test()
-        elif choice == '6':
-            load_new_files()
-        elif choice == '7':
-            export_pdf()
-        elif choice == '8':
-            task_stats()
-        elif choice == '9':
-            student_avg()
-        elif choice == '10':
-            student_task_analysis()
-        elif choice == '11':
-            show_charts()
-        elif choice == '0':
-            break
-        else:
-            print("Неверный выбор.")
+def list_commands():
+    click.echo()
+    click.echo("=" * 40)
+    click.echo("EgeStat — команды")
+    click.echo("=" * 40)
+    click.echo("")
+    click.echo("Таблицы:")
+    click.echo("  show-results              : результаты студентов по тестам")
+    click.echo("  task-stats [--sort]       : статистика по заданиям")
+    click.echo("  student-avg               : средний балл учеников")
+    click.echo("  student-task-analysis NAME : анализ заданий ученика")
+    click.echo("")
+    click.echo("Управление:")
+    click.echo("  delete-test TEST_ID       : удалить тест")
+    click.echo("  delete-student NAME       : удалить ученика")
+    click.echo("  rename-student OLD NEW    : переименовать ученика")
+    click.echo("  rename-test ID NAME       : переименовать тест")
+    click.echo("  load-files                : загрузить новые JSON")
+    click.echo("  export-pdf [--score]      : экспорт в PDF")
+    click.echo("")
+    click.echo("Графики:")
+    click.echo("  chart task-stats          : решаемость по заданиям")
+    click.echo("  chart student-avg [--score]: средний балл учеников")
+    click.echo("  chart student-task-analysis NAME : анализ заданий")
+    click.echo("")
+    click.echo("Справка:")
+    click.echo("  <команда> --help")
+    click.echo()
 
 
 if __name__ == '__main__':
-    main()
+    logging.basicConfig(
+        level=logging.WARNING,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    cli()
