@@ -374,8 +374,16 @@ def export_pdf():
     for name, row in pivot.iterrows():
         data.append([name] + [str(v) for v in row.values])
 
-    # Column widths
-    col_widths = [50 * mm] + [12 * mm] * (len(headers) - 1)
+    # Column widths — dynamic based on content
+    char_w = 0.7  # mm per char at 6pt
+    col_widths = [max(35, min(65, max(len(n) for n in pivot.index) * char_w + 6))]
+    for col in pivot.columns:
+        col_str = str(col)
+        max_val = max((len(str(v)) for v in pivot[col]), default=0)
+        longest = max(len(col_str), max_val)
+        col_widths.append(max(8, min(28, longest * char_w + 4)))
+
+    col_widths = [w * mm for w in col_widths]
     max_width = landscape(A4)[0] - 20 * mm
     total_width = sum(col_widths)
     if total_width > max_width:
