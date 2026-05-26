@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import menu
 import init_db
+from database import get_or_create_variant
 
 
 @pytest.fixture
@@ -46,13 +47,11 @@ def test_schema_creation(db_path):
 
     conn.close()
 
-    conn.close()
-
 
 def test_get_or_create_variant_creates_new(schema):
     """New variant is inserted and its id returned."""
     conn, cursor = schema
-    vid = menu.get_or_create_variant(cursor, 'test_variant', 12345)
+    vid = get_or_create_variant(cursor, 'test_variant', 12345)
     assert vid is not None
     cursor.execute('SELECT id, name, kim FROM variants WHERE id = ?', (vid,))
     row = cursor.fetchone()
@@ -63,8 +62,8 @@ def test_get_or_create_variant_creates_new(schema):
 def test_get_or_create_variant_returns_existing(schema):
     """Existing variant returns same id, no duplicate."""
     conn, cursor = schema
-    vid1 = menu.get_or_create_variant(cursor, 'dupe', 999)
-    vid2 = menu.get_or_create_variant(cursor, 'dupe', 999)
+    vid1 = get_or_create_variant(cursor, 'dupe', 999)
+    vid2 = get_or_create_variant(cursor, 'dupe', 999)
     assert vid1 == vid2
     cursor.execute('SELECT COUNT(*) FROM variants')
     assert cursor.fetchone()[0] == 1
@@ -73,7 +72,7 @@ def test_get_or_create_variant_returns_existing(schema):
 def test_insert_student(schema):
     """Student with results can be inserted and queried."""
     conn, cursor = schema
-    vid = menu.get_or_create_variant(cursor, 'variant_a', 111)
+    vid = get_or_create_variant(cursor, 'variant_a', 111)
 
     cursor.execute('''
         INSERT INTO students (id, name, user_id, variant_id, primary_score, secondary_score)
@@ -99,7 +98,7 @@ def test_insert_student(schema):
 def test_delete_variant_cascades(schema):
     """Deleting a variant removes its students and results."""
     conn, cursor = schema
-    vid = menu.get_or_create_variant(cursor, 'to_delete', 222)
+    vid = get_or_create_variant(cursor, 'to_delete', 222)
 
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
@@ -126,7 +125,7 @@ def test_delete_variant_cascades(schema):
 def test_rename_student_simple(schema):
     """Renaming a student when target doesn't exist."""
     conn, cursor = schema
-    vid = menu.get_or_create_variant(cursor, 'v1', 1)
+    vid = get_or_create_variant(cursor, 'v1', 1)
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES (?, ?, ?, ?, ?)
@@ -143,7 +142,7 @@ def test_rename_student_simple(schema):
 def test_rename_student_merge_higher_score_wins(schema):
     """When renaming to existing name, higher score is kept."""
     conn, cursor = schema
-    vid = menu.get_or_create_variant(cursor, 'v1', 1)
+    vid = get_or_create_variant(cursor, 'v1', 1)
 
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
@@ -199,8 +198,8 @@ def test_pivot_table_no_data(schema):
 def test_pivot_table_with_data(schema):
     """Pivot table returns correct shape and values."""
     conn, cursor = schema
-    v1 = menu.get_or_create_variant(cursor, 'variant_1', 1)
-    v2 = menu.get_or_create_variant(cursor, 'variant_2', 2)
+    v1 = get_or_create_variant(cursor, 'variant_1', 1)
+    v2 = get_or_create_variant(cursor, 'variant_2', 2)
 
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
@@ -244,7 +243,7 @@ def test_rename_to_same_name(db_path):
     cursor = conn.cursor()
     cursor.executescript(init_db.SCHEMA)
 
-    vid = menu.get_or_create_variant(cursor, 'v', 0)
+    vid = get_or_create_variant(cursor, 'v', 0)
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('x', 'Alice', ?, 5, 25)
@@ -262,8 +261,8 @@ def test_rename_to_same_name(db_path):
 def test_multiple_variants_same_student(schema):
     """Same student can appear in multiple variants."""
     conn, cursor = schema
-    v1 = menu.get_or_create_variant(cursor, 'math', 1)
-    v2 = menu.get_or_create_variant(cursor, 'phys', 2)
+    v1 = get_or_create_variant(cursor, 'math', 1)
+    v2 = get_or_create_variant(cursor, 'phys', 2)
 
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
@@ -296,22 +295,24 @@ def test_foreign_key_integrity(db_path):
     conn.close()
 
 
-def test_pdf_export_creates_file(schema, monkeypatch):
+def test_pdf_export_creates_file(db_path, monkeypatch):
     """PDF export creates a file when data exists."""
-    conn, cursor = schema
-    vid = menu.get_or_create_variant(cursor, 'test_pdf', 1)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.executescript(init_db.SCHEMA)
+    get_or_create_variant(cursor, 'test_pdf', 1)
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('p1', 'Alice', ?, 10, 50)
-    ''', (vid,))
+    ''', (1,))
     conn.commit()
     conn.close()
 
-    monkeypatch.setattr(menu, 'DB_PATH', schema.__self__.filename
-                        if hasattr(schema, '__self__') else menu.DB_PATH)
+    import database
+    monkeypatch.setattr(database, 'DB_PATH', db_path)
     monkeypatch.setattr('builtins.input', lambda _='': '1')
 
-    pdf_path = os.path.join(menu.FILES_DIR, 'results.pdf')
+    pdf_path = os.path.join(database.FILES_DIR, 'results.pdf')
     if os.path.exists(pdf_path):
         os.remove(pdf_path)
 
@@ -321,7 +322,7 @@ def test_pdf_export_creates_file(schema, monkeypatch):
 def test_get_or_create_variant_kim_none(schema):
     """get_or_create_variant works when kim is None."""
     conn, cursor = schema
-    vid = menu.get_or_create_variant(cursor, 'no_kim', None)
+    vid = get_or_create_variant(cursor, 'no_kim', None)
     cursor.execute('SELECT kim FROM variants WHERE id = ?', (vid,))
     assert cursor.fetchone()[0] is None
 
@@ -329,8 +330,8 @@ def test_get_or_create_variant_kim_none(schema):
 def test_task_stats_query(schema):
     """Task statistics grouped by number returns correct rates."""
     conn, cursor = schema
-    v1 = menu.get_or_create_variant(cursor, 'v1', 1)
-    v2 = menu.get_or_create_variant(cursor, 'v2', 1)
+    v1 = get_or_create_variant(cursor, 'v1', 1)
+    v2 = get_or_create_variant(cursor, 'v2', 1)
 
     # Student 1 with 2 tasks
     cursor.execute('''
@@ -367,8 +368,8 @@ def test_task_stats_query(schema):
 def test_student_avg_query(schema):
     """Average scores per student are calculated correctly."""
     conn, cursor = schema
-    v1 = menu.get_or_create_variant(cursor, 'v1', 1)
-    v2 = menu.get_or_create_variant(cursor, 'v2', 1)
+    v1 = get_or_create_variant(cursor, 'v1', 1)
+    v2 = get_or_create_variant(cursor, 'v2', 1)
 
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
@@ -403,7 +404,7 @@ def test_student_avg_query(schema):
 def test_student_task_analysis_query(schema):
     """Per-student task analysis returns only that student's data."""
     conn, cursor = schema
-    vid = menu.get_or_create_variant(cursor, 'v1', 1)
+    vid = get_or_create_variant(cursor, 'v1', 1)
 
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
@@ -458,7 +459,7 @@ def test_chart_task_stats_creates_file(schema):
     import matplotlib.pyplot as plt
 
     conn, cursor = schema
-    vid = menu.get_or_create_variant(cursor, 'v1', 1)
+    vid = get_or_create_variant(cursor, 'v1', 1)
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('s1', 'Alice', ?, 2, 50)
@@ -501,7 +502,7 @@ def test_chart_student_avg_creates_file(schema):
     import matplotlib.pyplot as plt
 
     conn, cursor = schema
-    vid = menu.get_or_create_variant(cursor, 'v1', 1)
+    vid = get_or_create_variant(cursor, 'v1', 1)
     cursor.execute('''
         INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
         VALUES ('s1', 'Alice', ?, 10, 50), ('s2', 'Bob', ?, 20, 80)

@@ -1,30 +1,17 @@
-import json
 import os
 import re
-import sqlite3
+
 import pandas as pd
 from tabulate import tabulate
 from tqdm import tqdm
 
-DB_PATH = os.path.join(os.getcwd(), 'ege_stat.db')
-FILES_DIR = os.path.join(os.getcwd(), 'files')
-
-
-def get_connection():
-    return sqlite3.connect(DB_PATH)
+from database import Database, FILES_DIR
 
 
 def show_results():
-    conn = get_connection()
-
-    students = pd.read_sql_query('''
-        SELECT s.name, v.name as variant_name,
-               s.primary_score, s.secondary_score
-        FROM students s
-        JOIN variants v ON s.variant_id = v.id
-    ''', conn)
-
-    conn.close()
+    db = Database()
+    with db:
+        students = db.get_students_pivot_data()
 
     if students.empty:
         print("Нет данных.")
@@ -36,7 +23,6 @@ def show_results():
     choice = input("> ").strip()
 
     value_col = 'secondary_score' if choice == '2' else 'primary_score'
-    label = 'Вторичный балл' if choice == '2' else 'Первичный балл'
 
     pivot = students.pivot_table(
         index='name', columns='variant_name', values=value_col,
@@ -50,13 +36,11 @@ def show_results():
 
 
 def delete_test():
-    conn = get_connection()
-    variants = pd.read_sql_query(
-        'SELECT id, name FROM variants ORDER BY name', conn
-    )
+    db = Database()
+    with db:
+        variants = db.get_variants()
 
     if variants.empty:
-        conn.close()
         print("Нет тестов.")
         return
 
@@ -67,11 +51,9 @@ def delete_test():
 
     choice = input("> ").strip()
     if not choice.isdigit():
-        conn.close()
         return
     idx = int(choice)
     if idx == 0 or idx > len(variants):
-        conn.close()
         return
 
     variant = variants.iloc[idx - 1]
@@ -79,28 +61,18 @@ def delete_test():
         f"Удалить тест «{variant['name']}» и все его результаты? (д/н): "
     ).strip().lower()
     if confirm != 'д':
-        conn.close()
         return
 
-    cursor = conn.cursor()
-    cursor.execute(
-        'DELETE FROM results WHERE student_id IN '
-        '(SELECT id FROM students WHERE variant_id = ?)',
-        (int(variant['id']),)
-    )
-    cursor.execute('DELETE FROM students WHERE variant_id = ?', (int(variant['id']),))
-    cursor.execute('DELETE FROM variants WHERE id = ?', (int(variant['id']),))
-    conn.commit()
-    conn.close()
+    with db:
+        db.delete_variant(int(variant['id']))
+        db.commit()
     print(f"Тест «{variant['name']}» удалён.")
 
 
 def rename_student():
-    conn = get_connection()
-    names = pd.read_sql_query(
-        'SELECT DISTINCT name FROM students ORDER BY name', conn
-    )
-    conn.close()
+    db = Database()
+    with db:
+        names = db.get_student_names()
 
     if names.empty:
         print("Нет учеников.")
@@ -123,64 +95,36 @@ def rename_student():
     if not new_name or new_name == old_name:
         return
 
-    conn = get_connection()
-    cursor = conn.cursor()
+    with db:
+        if db.target_name_exists(new_name):
+            old_variants = db.get_student_variants(old_name)
+            new_variants = db.get_student_variants(new_name)
 
-    cursor.execute('SELECT COUNT(*) FROM students WHERE name = ?', (new_name,))
-    target_exists = cursor.fetchone()[0] > 0
+            for vid in old_variants & new_variants:
+                old_rows = db.get_student_scores_by_variant(old_name, vid)
+                new_rows = db.get_student_scores_by_variant(new_name, vid)
 
-    if target_exists:
-        cursor.execute(
-            'SELECT DISTINCT variant_id FROM students WHERE name = ?',
-            (old_name,)
-        )
-        old_variants = {r[0] for r in cursor.fetchall()}
+                old_best = max(r[1] or 0 for r in old_rows)
+                new_best = max(r[1] or 0 for r in new_rows)
 
-        cursor.execute(
-            'SELECT variant_id FROM students WHERE name = ?',
-            (new_name,)
-        )
-        new_variants = {r[0] for r in cursor.fetchall()}
+                if old_best >= new_best:
+                    loser_ids = [r[0] for r in new_rows]
+                else:
+                    loser_ids = [r[0] for r in old_rows]
 
-        for vid in old_variants & new_variants:
-            cursor.execute(
-                'SELECT id, primary_score FROM students WHERE name = ? AND variant_id = ?',
-                (old_name, vid)
-            )
-            old_rows = cursor.fetchall()
+                db.delete_student_by_ids(loser_ids)
 
-            cursor.execute(
-                'SELECT id, primary_score FROM students WHERE name = ? AND variant_id = ?',
-                (new_name, vid)
-            )
-            new_rows = cursor.fetchall()
-
-            old_best = max(r[1] or 0 for r in old_rows)
-            new_best = max(r[1] or 0 for r in new_rows)
-
-            if old_best >= new_best:
-                loser_ids = [r[0] for r in new_rows]
-            else:
-                loser_ids = [r[0] for r in old_rows]
-
-            for sid in loser_ids:
-                cursor.execute('DELETE FROM results WHERE student_id = ?', (sid,))
-                cursor.execute('DELETE FROM students WHERE id = ?', (sid,))
-
-    cursor.execute('UPDATE students SET name = ? WHERE name = ?', (new_name, old_name))
-    conn.commit()
-    conn.close()
+        db.rename_student_simple(old_name, new_name)
+        db.commit()
     print(f"«{old_name}» переименован в «{new_name}».")
 
 
 def rename_test():
-    conn = get_connection()
-    variants = pd.read_sql_query(
-        'SELECT id, name FROM variants ORDER BY name', conn
-    )
+    db = Database()
+    with db:
+        variants = db.get_variants()
 
     if variants.empty:
-        conn.close()
         print("Нет тестов.")
         return
 
@@ -191,32 +135,26 @@ def rename_test():
 
     choice = input("> ").strip()
     if not choice.isdigit():
-        conn.close()
         return
     idx = int(choice)
     if idx == 0 or idx > len(variants):
-        conn.close()
         return
 
     variant = variants.iloc[idx - 1]
     new_name = input(f"Новое название для «{variant['name']}»: ").strip()
     if not new_name or new_name == variant['name']:
-        conn.close()
         return
 
-    cursor = conn.cursor()
-    cursor.execute('UPDATE variants SET name = ? WHERE id = ?', (new_name, int(variant['id'])))
-    conn.commit()
-    conn.close()
+    with db:
+        db.rename_variant(int(variant['id']), new_name)
+        db.commit()
     print(f"Тест «{variant['name']}» переименован в «{new_name}».")
 
 
 def delete_student():
-    conn = get_connection()
-    names = pd.read_sql_query(
-        'SELECT DISTINCT name FROM students ORDER BY name', conn
-    )
-    conn.close()
+    db = Database()
+    with db:
+        names = db.get_student_names()
 
     if names.empty:
         print("Нет учеников.")
@@ -241,37 +179,16 @@ def delete_student():
     if confirm != 'д':
         return
 
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        'DELETE FROM results WHERE student_id IN '
-        '(SELECT id FROM students WHERE name = ?)',
-        (name,)
-    )
-    cursor.execute('DELETE FROM students WHERE name = ?', (name,))
-    conn.commit()
-    conn.close()
+    with db:
+        db.delete_student(name)
+        db.commit()
     print(f"Ученик «{name}» удалён.")
 
 
-def get_or_create_variant(cursor, name, kim):
-    cursor.execute('SELECT id FROM variants WHERE name = ?', (name,))
-    row = cursor.fetchone()
-    if row:
-        return row[0]
-    cursor.execute(
-        'INSERT INTO variants (name, kim) VALUES (?, ?)',
-        (name, kim)
-    )
-    return cursor.lastrowid
-
-
 def load_new_files():
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute('SELECT name FROM variants')
-    existing = {r[0] for r in cursor.fetchall()}
+    db = Database()
+    with db:
+        existing = db.get_existing_variant_names()
 
     json_files = sorted(
         f for f in os.listdir(FILES_DIR) if f.endswith('.json')
@@ -280,49 +197,15 @@ def load_new_files():
 
     if not new_files:
         print("Новых файлов нет.")
-        conn.close()
         return
 
+    total = 0
     for filename in tqdm(new_files, desc="Загрузка новых файлов", unit="файл"):
-        filepath = os.path.join(FILES_DIR, filename)
         variant_name = re.sub(r'\.json$', '', filename)
+        with db:
+            count = db.load_json_file(filename, variant_name)
+        total += count
 
-        with open(filepath, 'r', encoding='utf-8') as f:
-            records = json.load(f)
-
-        if not records:
-            continue
-
-        kim = records[0].get('kim')
-        variant_id = get_or_create_variant(cursor, variant_name, kim)
-
-        for rec in records:
-            cursor.execute('''
-                INSERT OR IGNORE INTO students
-                    (id, name, user_id, variant_id, primary_score,
-                     secondary_score, duration, hide, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                rec['id'], rec['name'], rec.get('user_id'), variant_id,
-                rec.get('primaryScore'), rec.get('secondaryScore'),
-                rec.get('duration'),
-                1 if rec.get('hide') else 0,
-                rec.get('createdAt'), rec.get('updatedAt')
-            ))
-
-            for r in rec.get('result', []):
-                cursor.execute('''
-                    INSERT INTO results
-                        (student_id, key, score, answer, number, task_id)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (
-                    rec['id'], r.get('key'), r.get('score'),
-                    r.get('answer'), r.get('number'), r.get('taskId')
-                ))
-
-        conn.commit()
-
-    conn.close()
     print(f"Загружено {len(new_files)} новых файлов.")
 
 
@@ -335,14 +218,9 @@ def export_pdf():
     from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.lib.styles import getSampleStyleSheet
 
-    conn = get_connection()
-    students = pd.read_sql_query('''
-        SELECT s.name, v.name as variant_name,
-               s.primary_score, s.secondary_score
-        FROM students s
-        JOIN variants v ON s.variant_id = v.id
-    ''', conn)
-    conn.close()
+    db = Database()
+    with db:
+        students = db.get_students_pivot_data()
 
     if students.empty:
         print("Нет данных.")
@@ -368,15 +246,13 @@ def export_pdf():
     style_normal = styles['Normal']
     style_normal.fontName = 'ArialUnicode'
 
-    # Build table data — headers are just numbers
     n_cols = len(pivot.columns) + 1
     data = [['Имя'] + [str(i) for i in range(1, n_cols)]]
     for name, row in pivot.iterrows():
         data.append([name, *[str(v) for v in row.values]])
 
-    # Column widths
     name_width = max(30, min(55, max(len(n) for n in pivot.index) * 0.65 + 6)) * mm
-    data_col_width = 8 * mm  # fixed narrow width for numbers
+    data_col_width = 8 * mm
 
     col_widths = [name_width] + [data_col_width] * (n_cols - 1)
     page_width = landscape(A4)[0] - 20 * mm
@@ -410,16 +286,9 @@ def export_pdf():
 
 
 def task_stats():
-    conn = get_connection()
-    stats = pd.read_sql_query('''
-        SELECT r.number as task_number,
-               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
-        FROM results r
-        GROUP BY r.number
-        ORDER BY r.number ASC
-    ''', conn)
-
-    conn.close()
+    db = Database()
+    with db:
+        stats = db.get_task_stats()
 
     if stats.empty:
         print("Нет данных.")
@@ -445,18 +314,9 @@ def task_stats():
 
 
 def student_avg():
-    conn = get_connection()
-    avg = pd.read_sql_query('''
-        SELECT s.name,
-               ROUND(AVG(s.primary_score), 1) as avg_primary,
-               ROUND(AVG(s.secondary_score), 1) as avg_secondary,
-               COUNT(*) as tests_count
-        FROM students s
-        GROUP BY s.name
-        ORDER BY avg_primary DESC
-    ''', conn)
-
-    conn.close()
+    db = Database()
+    with db:
+        avg = db.get_student_avg()
 
     if avg.empty:
         print("Нет данных.")
@@ -469,11 +329,9 @@ def student_avg():
 
 
 def student_task_analysis():
-    conn = get_connection()
-    names = pd.read_sql_query(
-        'SELECT DISTINCT name FROM students ORDER BY name', conn
-    )
-    conn.close()
+    db = Database()
+    with db:
+        names = db.get_student_names()
 
     if names.empty:
         print("Нет учеников.")
@@ -493,17 +351,8 @@ def student_task_analysis():
 
     name = names.iloc[idx - 1]['name']
 
-    conn = get_connection()
-    stats = pd.read_sql_query('''
-        SELECT r.number as task_number,
-               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
-        FROM results r
-        JOIN students s ON r.student_id = s.id
-        WHERE s.name = ?
-        GROUP BY r.number
-        ORDER BY solve_rate ASC
-    ''', conn, params=(name,))
-    conn.close()
+    with db:
+        stats = db.get_student_task_analysis(name)
 
     if stats.empty:
         print(f"У ученика «{name}» нет данных о заданиях.")
@@ -561,15 +410,10 @@ def show_charts():
 
 
 def _chart_task_stats(plt):
-    conn = get_connection()
-    stats = pd.read_sql_query('''
-        SELECT r.number as task_number,
-               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
-        FROM results r
-        GROUP BY r.number
-        ORDER BY r.number ASC
-    ''', conn)
-    conn.close()
+    db = Database()
+    with db:
+        stats = db.get_task_stats()
+
     if stats.empty:
         print("Нет данных.")
         return
@@ -602,16 +446,10 @@ def _chart_student_avg(plt):
     col = 'avg_secondary' if score_choice == '2' else 'avg_primary'
     label = 'Вторичный' if score_choice == '2' else 'Первичный'
 
-    conn = get_connection()
-    avg = pd.read_sql_query(f'''
-        SELECT s.name,
-               ROUND(AVG(s.primary_score), 1) as avg_primary,
-               ROUND(AVG(s.secondary_score), 1) as avg_secondary
-        FROM students s
-        GROUP BY s.name
-        ORDER BY {col} DESC
-    ''', conn)
-    conn.close()
+    db = Database()
+    with db:
+        avg = db.get_student_avg(col)
+
     if avg.empty:
         print("Нет данных.")
         return
@@ -634,11 +472,10 @@ def _chart_student_avg(plt):
 
 
 def _chart_student_task_analysis(plt):
-    conn = get_connection()
-    names = pd.read_sql_query(
-        'SELECT DISTINCT name FROM students ORDER BY name', conn
-    )
-    conn.close()
+    db = Database()
+    with db:
+        names = db.get_student_names()
+
     if names.empty:
         print("Нет учеников.")
         return
@@ -657,17 +494,9 @@ def _chart_student_task_analysis(plt):
 
     name = names.iloc[idx - 1]['name']
 
-    conn = get_connection()
-    stats = pd.read_sql_query('''
-        SELECT r.number as task_number,
-               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
-        FROM results r
-        JOIN students s ON r.student_id = s.id
-        WHERE s.name = ?
-        GROUP BY r.number
-        ORDER BY r.number ASC
-    ''', conn, params=(name,))
-    conn.close()
+    with db:
+        stats = db.get_student_task_analysis(name)
+
     if stats.empty:
         print(f"У ученика «{name}» нет данных о заданиях.")
         return
