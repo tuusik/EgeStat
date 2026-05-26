@@ -529,7 +529,6 @@ def student_task_analysis():
 
 def show_charts():
     import matplotlib
-    matplotlib.use('Agg')
     import matplotlib.pyplot as plt
 
     font_path = '/Library/Fonts/Arial Unicode.ttf'
@@ -591,20 +590,26 @@ def _chart_task_stats(plt):
                 f'{rate:.0f}%', ha='center', va='bottom', fontsize=8)
 
     fig.tight_layout()
-    save_path = os.path.join(FILES_DIR, 'chart_task_stats.png')
-    fig.savefig(save_path, dpi=150)
+    plt.show()
     plt.close(fig)
-    print(f"График сохранён: {save_path}")
 
 
 def _chart_student_avg(plt):
+    print("\nБаллы:")
+    print("1) Первичные")
+    print("2) Вторичные")
+    score_choice = input("> ").strip()
+    col = 'avg_secondary' if score_choice == '2' else 'avg_primary'
+    label = 'Вторичный' if score_choice == '2' else 'Первичный'
+
     conn = get_connection()
-    avg = pd.read_sql_query('''
+    avg = pd.read_sql_query(f'''
         SELECT s.name,
-               ROUND(AVG(s.primary_score), 1) as avg_primary
+               ROUND(AVG(s.primary_score), 1) as avg_primary,
+               ROUND(AVG(s.secondary_score), 1) as avg_secondary
         FROM students s
         GROUP BY s.name
-        ORDER BY avg_primary DESC
+        ORDER BY {col} DESC
     ''', conn)
     conn.close()
     if avg.empty:
@@ -614,20 +619,18 @@ def _chart_student_avg(plt):
     fig, ax = plt.subplots(figsize=(10, max(4, len(avg) * 0.4)))
     colors = ['#4472C4', '#ED7D31', '#70AD47', '#FFC000', '#5B9BD5', '#A5A5A5']
     bar_colors = [colors[i % len(colors)] for i in range(len(avg))]
-    bars = ax.barh(avg['name'], avg['avg_primary'], color=bar_colors, edgecolor='white')
-    ax.set_xlabel('Средний первичный балл')
-    ax.set_title('Средний балл учеников')
+    bars = ax.barh(avg['name'], avg[col], color=bar_colors, edgecolor='white')
+    ax.set_xlabel(f'Средний {label.lower()} балл')
+    ax.set_title(f'Средний {label.lower()} балл учеников')
     ax.invert_yaxis()
 
-    for bar, val in zip(bars, avg['avg_primary']):
+    for bar, val in zip(bars, avg[col]):
         ax.text(bar.get_width() + 0.3, bar.get_y() + bar.get_height() / 2,
                 f'{val:.1f}', ha='left', va='center', fontsize=9)
 
     fig.tight_layout()
-    save_path = os.path.join(FILES_DIR, 'chart_student_avg.png')
-    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.show()
     plt.close(fig)
-    print(f"График сохранён: {save_path}")
 
 
 def _chart_student_task_analysis(plt):
@@ -685,10 +688,8 @@ def _chart_student_task_analysis(plt):
                 f'{rate:.0f}%', ha='center', va='bottom', fontsize=8)
 
     fig.tight_layout()
-    save_path = os.path.join(FILES_DIR, 'chart_student_tasks.png')
-    fig.savefig(save_path, dpi=150)
+    plt.show()
     plt.close(fig)
-    print(f"График сохранён: {save_path}")
 
 
 def main():
