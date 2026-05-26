@@ -8,6 +8,39 @@ from tqdm import tqdm
 DB_PATH = os.path.join(os.getcwd(), 'ege_stat.db')
 FILES_DIR = os.path.join(os.getcwd(), 'files')
 
+SCHEMA = '''
+    CREATE TABLE IF NOT EXISTS variants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        kim INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS students (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        user_id TEXT,
+        variant_id INTEGER NOT NULL,
+        primary_score INTEGER,
+        secondary_score INTEGER,
+        duration INTEGER,
+        hide INTEGER,
+        created_at TEXT,
+        updated_at TEXT,
+        FOREIGN KEY (variant_id) REFERENCES variants(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id TEXT NOT NULL,
+        key TEXT,
+        score INTEGER,
+        answer TEXT,
+        number INTEGER,
+        task_id INTEGER,
+        FOREIGN KEY (student_id) REFERENCES students(id)
+    );
+'''
+
 
 def get_or_create_variant(cursor, name, kim):
     cursor.execute('SELECT id FROM variants WHERE name = ?', (name,))
@@ -25,38 +58,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    cursor.executescript('''
-        CREATE TABLE IF NOT EXISTS variants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            kim INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS students (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            user_id TEXT,
-            variant_id INTEGER NOT NULL,
-            primary_score INTEGER,
-            secondary_score INTEGER,
-            duration INTEGER,
-            hide INTEGER,
-            created_at TEXT,
-            updated_at TEXT,
-            FOREIGN KEY (variant_id) REFERENCES variants(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_id TEXT NOT NULL,
-            key TEXT,
-            score INTEGER,
-            answer TEXT,
-            number INTEGER,
-            task_id INTEGER,
-            FOREIGN KEY (student_id) REFERENCES students(id)
-        );
-    ''')
+    cursor.executescript(SCHEMA)
 
     conn.commit()
     return conn, cursor
