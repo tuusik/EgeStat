@@ -38,7 +38,7 @@ def show_results():
         index='name', columns='variant_name', values=value_col,
         aggfunc='max'
     )
-    pivot = pivot.astype('Int64').astype(object).fillna('-')
+    pivot = pivot.astype('Int64').map(lambda x: x if pd.notna(x) else '-')
 
     pivot.index.name = 'Имя'
     print()
