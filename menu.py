@@ -531,7 +531,6 @@ def show_charts():
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from matplotlib.ticker import PercentFormatter
 
     font_path = '/Library/Fonts/Arial Unicode.ttf'
     if os.path.exists(font_path):
@@ -583,7 +582,7 @@ def _chart_task_stats(plt):
     ax.set_xlabel('Номер задания')
     ax.set_ylabel('% решаемости')
     ax.set_title('Решаемость заданий (все ученики)')
-    ax.yaxis.set_major_formatter(PercentFormatter(decimals=0))
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}%'))
     ax.set_xticks(stats['task_number'])
     ax.set_ylim(0, 105)
 
@@ -677,7 +676,7 @@ def _chart_student_task_analysis(plt):
     ax.set_xlabel('Номер задания')
     ax.set_ylabel('% решаемости')
     ax.set_title(f'Решаемость заданий — {name}')
-    ax.yaxis.set_major_formatter(PercentFormatter(decimals=0))
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}%'))
     ax.set_xticks(stats['task_number'])
     ax.set_ylim(0, 105)
 
