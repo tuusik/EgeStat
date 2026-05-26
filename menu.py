@@ -409,6 +409,116 @@ def export_pdf():
     print(f"PDF сохранён: {pdf_path}")
 
 
+def task_stats():
+    conn = get_connection()
+    stats = pd.read_sql_query('''
+        SELECT r.task_id,
+               COUNT(*) as attempts,
+               SUM(r.score) as solves,
+               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
+        FROM results r
+        GROUP BY r.task_id
+        ORDER BY solve_rate ASC
+    ''', conn)
+
+    variants_count = pd.read_sql_query('''
+        SELECT r.task_id, COUNT(DISTINCT v.name) as variants
+        FROM results r
+        JOIN students s ON r.student_id = s.id
+        JOIN variants v ON s.variant_id = v.id
+        GROUP BY r.task_id
+    ''', conn)
+
+    conn.close()
+
+    if stats.empty:
+        print("Нет данных.")
+        return
+
+    stats = stats.merge(variants_count, on='task_id', how='left').fillna(0)
+    for col in ['task_id', 'attempts', 'solves', 'variants']:
+        stats[col] = stats[col].astype(int)
+
+    print()
+    print("Статистика по заданиям (все ученики):")
+    stats.columns = ['ID задания', 'Попыток', 'Решено', '% решаемости', 'В скольких тестах']
+    print(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
+
+
+def student_avg():
+    conn = get_connection()
+    avg = pd.read_sql_query('''
+        SELECT s.name,
+               ROUND(AVG(s.primary_score), 1) as avg_primary,
+               ROUND(AVG(s.secondary_score), 1) as avg_secondary,
+               COUNT(*) as tests_count
+        FROM students s
+        GROUP BY s.name
+        ORDER BY avg_primary DESC
+    ''', conn)
+
+    conn.close()
+
+    if avg.empty:
+        print("Нет данных.")
+        return
+
+    print()
+    print("Средний балл учеников:")
+    avg.columns = ['Имя', 'Ср. первичный', 'Ср. вторичный', 'Тестов']
+    print(tabulate(avg, headers='keys', tablefmt='grid', showindex=False))
+
+
+def student_task_analysis():
+    conn = get_connection()
+    names = pd.read_sql_query(
+        'SELECT DISTINCT name FROM students ORDER BY name', conn
+    )
+    conn.close()
+
+    if names.empty:
+        print("Нет учеников.")
+        return
+
+    print("\nВыберите ученика:")
+    for i, row in names.iterrows():
+        print(f"{i + 1}) {row['name']}")
+    print("0) Отмена")
+
+    choice = input("> ").strip()
+    if not choice.isdigit():
+        return
+    idx = int(choice)
+    if idx == 0 or idx > len(names):
+        return
+
+    name = names.iloc[idx - 1]['name']
+
+    conn = get_connection()
+    stats = pd.read_sql_query('''
+        SELECT r.task_id,
+               COUNT(*) as attempts,
+               SUM(r.score) as solves,
+               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
+        FROM results r
+        JOIN students s ON r.student_id = s.id
+        WHERE s.name = ?
+        GROUP BY r.task_id
+        ORDER BY solve_rate ASC
+    ''', conn, params=(name,))
+    conn.close()
+
+    if stats.empty:
+        print(f"У ученика «{name}» нет данных о заданиях.")
+        return
+
+    stats = stats.astype({'task_id': int, 'attempts': int, 'solves': int})
+
+    print(f"\nАнализ заданий для «{name}»:")
+    stats.columns = ['ID задания', 'Попыток', 'Решено', '% решаемости']
+    print(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
+
+
 def main():
     while True:
         print()
@@ -422,6 +532,10 @@ def main():
         print("5) Переименовать тест")
         print("6) Загрузить новые файлы")
         print("7) Экспорт в PDF")
+        print("--- Аналитика ---")
+        print("8) Статистика по заданиям")
+        print("9) Средний балл учеников")
+        print("10) Анализ заданий ученика")
         print("0) Выход")
 
         choice = input("> ").strip()
@@ -440,6 +554,12 @@ def main():
             load_new_files()
         elif choice == '7':
             export_pdf()
+        elif choice == '8':
+            task_stats()
+        elif choice == '9':
+            student_avg()
+        elif choice == '10':
+            student_task_analysis()
         elif choice == '0':
             break
         else:
