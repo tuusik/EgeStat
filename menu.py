@@ -326,6 +326,86 @@ def load_new_files():
     print(f"Загружено {len(new_files)} новых файлов.")
 
 
+def export_pdf():
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    conn = get_connection()
+    students = pd.read_sql_query('''
+        SELECT s.name, v.name as variant_name,
+               s.primary_score, s.secondary_score
+        FROM students s
+        JOIN variants v ON s.variant_id = v.id
+    ''', conn)
+    conn.close()
+
+    if students.empty:
+        print("Нет данных.")
+        return
+
+    print("\nФормат экспорта:")
+    print("1) Первичные баллы")
+    print("2) Вторичные баллы")
+    choice = input("> ").strip()
+
+    value_col = 'secondary_score' if choice == '2' else 'primary_score'
+
+    pivot = students.pivot_table(
+        index='name', columns='variant_name', values=value_col,
+        aggfunc='max'
+    )
+    pivot = pivot.astype('Int64').map(lambda x: int(x) if pd.notna(x) else '-')
+
+    font_path = '/Library/Fonts/Arial Unicode.ttf'
+    pdfmetrics.registerFont(TTFont('ArialUnicode', font_path))
+
+    styles = getSampleStyleSheet()
+    style_normal = styles['Normal']
+    style_normal.fontName = 'ArialUnicode'
+
+    # Build table data
+    headers = ['Имя'] + [str(c) for c in pivot.columns]
+    data = [headers]
+    for name, row in pivot.iterrows():
+        data.append([name] + [str(v) for v in row.values])
+
+    # Column widths
+    col_widths = [50 * mm] + [12 * mm] * (len(headers) - 1)
+    max_width = landscape(A4)[0] - 20 * mm
+    total_width = sum(col_widths)
+    if total_width > max_width:
+        col_widths = [w * max_width / total_width for w in col_widths]
+
+    pdf_path = os.path.join(FILES_DIR, 'results.pdf')
+    doc = SimpleDocTemplate(
+        pdf_path, pagesize=landscape(A4),
+        leftMargin=10 * mm, rightMargin=10 * mm,
+        topMargin=10 * mm, bottomMargin=10 * mm
+    )
+
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'ArialUnicode'),
+        ('FONTSIZE', (0, 0), (-1, -1), 6),
+        ('FONTSIZE', (0, 0), (-1, 0), 7),
+        ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4472C4')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#D9E2F3')]),
+    ]))
+
+    elems = [Paragraph("Результаты тестов", style_normal), Spacer(1, 5 * mm), table]
+    doc.build(elems)
+    print(f"PDF сохранён: {pdf_path}")
+
+
 def main():
     while True:
         print()
@@ -338,6 +418,7 @@ def main():
         print("4) Переименовать ученика")
         print("5) Переименовать тест")
         print("6) Загрузить новые файлы")
+        print("7) Экспорт в PDF")
         print("0) Выход")
 
         choice = input("> ").strip()
@@ -354,6 +435,8 @@ def main():
             rename_test()
         elif choice == '6':
             load_new_files()
+        elif choice == '7':
+            export_pdf()
         elif choice == '0':
             break
         else:
