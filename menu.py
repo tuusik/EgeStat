@@ -42,7 +42,7 @@ def show_results():
 
     pivot.index.name = 'Имя'
     click.echo()
-    click.echo(tabulate(pivot, headers='keys', tablefmt='grid'))
+    click.echo_via_pager(tabulate(pivot, headers='keys', tablefmt='grid'))
 
 
 @cli.command("delete-test")
@@ -250,7 +250,7 @@ def task_stats(sort):
     stats.columns = ['№ задания', '% решаемости']
     click.echo()
     click.echo("Статистика по номерам заданий (все ученики):")
-    click.echo(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
+    click.echo_via_pager(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
 
 
 @cli.command("student-avg")
@@ -265,8 +265,7 @@ def student_avg():
 
     click.echo()
     click.echo("Средний балл учеников:")
-    avg.columns = ['Имя', 'Ср. первичный', 'Ср. вторичный', 'Тестов']
-    click.echo(tabulate(avg, headers='keys', tablefmt='grid', showindex=False))
+    click.echo_via_pager(tabulate(avg, headers='keys', tablefmt='grid', showindex=False))
 
 
 @cli.command("student-task-analysis")
@@ -291,7 +290,7 @@ def student_task_analysis(name, sort):
 
     click.echo(f"\nАнализ заданий для «{name}»:")
     stats.columns = ['№ задания', '% решаемости']
-    click.echo(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
+    click.echo_via_pager(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
 
 
 # ---- Charts ----
