@@ -412,21 +412,13 @@ def export_pdf():
 def task_stats():
     conn = get_connection()
     stats = pd.read_sql_query('''
-        SELECT r.task_id,
+        SELECT r.number as task_number,
                COUNT(*) as attempts,
                SUM(r.score) as solves,
                ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
         FROM results r
-        GROUP BY r.task_id
+        GROUP BY r.number
         ORDER BY solve_rate ASC
-    ''', conn)
-
-    variants_count = pd.read_sql_query('''
-        SELECT r.task_id, COUNT(DISTINCT v.name) as variants
-        FROM results r
-        JOIN students s ON r.student_id = s.id
-        JOIN variants v ON s.variant_id = v.id
-        GROUP BY r.task_id
     ''', conn)
 
     conn.close()
@@ -435,13 +427,11 @@ def task_stats():
         print("Нет данных.")
         return
 
-    stats = stats.merge(variants_count, on='task_id', how='left').fillna(0)
-    for col in ['task_id', 'attempts', 'solves', 'variants']:
-        stats[col] = stats[col].astype(int)
+    stats = stats.astype({'task_number': int, 'attempts': int, 'solves': int})
 
     print()
-    print("Статистика по заданиям (все ученики):")
-    stats.columns = ['ID задания', 'Попыток', 'Решено', '% решаемости', 'В скольких тестах']
+    print("Статистика по номерам заданий (все ученики):")
+    stats.columns = ['№ задания', 'Попыток', 'Решено', '% решаемости']
     print(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
 
 
@@ -496,14 +486,14 @@ def student_task_analysis():
 
     conn = get_connection()
     stats = pd.read_sql_query('''
-        SELECT r.task_id,
+        SELECT r.number as task_number,
                COUNT(*) as attempts,
                SUM(r.score) as solves,
                ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
         FROM results r
         JOIN students s ON r.student_id = s.id
         WHERE s.name = ?
-        GROUP BY r.task_id
+        GROUP BY r.number
         ORDER BY solve_rate ASC
     ''', conn, params=(name,))
     conn.close()
@@ -512,10 +502,10 @@ def student_task_analysis():
         print(f"У ученика «{name}» нет данных о заданиях.")
         return
 
-    stats = stats.astype({'task_id': int, 'attempts': int, 'solves': int})
+    stats = stats.astype({'task_number': int, 'attempts': int, 'solves': int})
 
     print(f"\nАнализ заданий для «{name}»:")
-    stats.columns = ['ID задания', 'Попыток', 'Решено', '% решаемости']
+    stats.columns = ['№ задания', 'Попыток', 'Решено', '% решаемости']
     print(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
 
 
