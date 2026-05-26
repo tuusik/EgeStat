@@ -169,6 +169,44 @@ def rename_student():
     print(f"«{old_name}» переименован в «{new_name}».")
 
 
+def rename_test():
+    conn = get_connection()
+    variants = pd.read_sql_query(
+        'SELECT id, name FROM variants ORDER BY name', conn
+    )
+
+    if variants.empty:
+        conn.close()
+        print("Нет тестов.")
+        return
+
+    print("\nВыберите тест для переименования:")
+    for i, row in variants.iterrows():
+        print(f"{i + 1}) {row['name']}")
+    print("0) Отмена")
+
+    choice = input("> ").strip()
+    if not choice.isdigit():
+        conn.close()
+        return
+    idx = int(choice)
+    if idx == 0 or idx > len(variants):
+        conn.close()
+        return
+
+    variant = variants.iloc[idx - 1]
+    new_name = input(f"Новое название для «{variant['name']}»: ").strip()
+    if not new_name or new_name == variant['name']:
+        conn.close()
+        return
+
+    cursor = conn.cursor()
+    cursor.execute('UPDATE variants SET name = ? WHERE id = ?', (new_name, int(variant['id'])))
+    conn.commit()
+    conn.close()
+    print(f"Тест «{variant['name']}» переименован в «{new_name}».")
+
+
 def delete_student():
     conn = get_connection()
     names = pd.read_sql_query(
@@ -222,6 +260,7 @@ def main():
         print("2) Удалить тест")
         print("3) Удалить ученика")
         print("4) Переименовать ученика")
+        print("5) Переименовать тест")
         print("0) Выход")
 
         choice = input("> ").strip()
@@ -234,6 +273,8 @@ def main():
             delete_student()
         elif choice == '4':
             rename_student()
+        elif choice == '5':
+            rename_test()
         elif choice == '0':
             break
         else:
