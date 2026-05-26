@@ -527,6 +527,171 @@ def student_task_analysis():
     print(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
 
 
+def show_charts():
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import PercentFormatter
+
+    font_path = '/Library/Fonts/Arial Unicode.ttf'
+    if os.path.exists(font_path):
+        from matplotlib import font_manager
+        font_manager.fontManager.addfont(font_path)
+        plt.rcParams['font.family'] = font_manager.FontProperties(fname=font_path).get_name()
+    plt.rcParams['axes.unicode_minus'] = False
+
+    while True:
+        print()
+        print("--- ГРАФИКИ ---")
+        print("1) Решаемость по заданиям (все ученики)")
+        print("2) Средний балл учеников")
+        print("3) Анализ заданий конкретного ученика")
+        print("0) Назад")
+        choice = input("> ").strip()
+
+        if choice == '0':
+            plt.close('all')
+            return
+        elif choice == '1':
+            _chart_task_stats(plt)
+        elif choice == '2':
+            _chart_student_avg(plt)
+        elif choice == '3':
+            _chart_student_task_analysis(plt)
+        else:
+            print("Неверный выбор.")
+
+
+def _chart_task_stats(plt):
+    conn = get_connection()
+    stats = pd.read_sql_query('''
+        SELECT r.number as task_number,
+               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
+        FROM results r
+        GROUP BY r.number
+        ORDER BY r.number ASC
+    ''', conn)
+    conn.close()
+    if stats.empty:
+        print("Нет данных.")
+        return
+
+    stats = stats.astype({'task_number': int})
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    bars = ax.bar(stats['task_number'], stats['solve_rate'], color='#4472C4', edgecolor='white')
+    ax.set_xlabel('Номер задания')
+    ax.set_ylabel('% решаемости')
+    ax.set_title('Решаемость заданий (все ученики)')
+    ax.yaxis.set_major_formatter(PercentFormatter(decimals=0))
+    ax.set_xticks(stats['task_number'])
+    ax.set_ylim(0, 105)
+
+    for bar, rate in zip(bars, stats['solve_rate']):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                f'{rate:.0f}%', ha='center', va='bottom', fontsize=8)
+
+    fig.tight_layout()
+    save_path = os.path.join(FILES_DIR, 'chart_task_stats.png')
+    fig.savefig(save_path, dpi=150)
+    plt.close(fig)
+    print(f"График сохранён: {save_path}")
+
+
+def _chart_student_avg(plt):
+    conn = get_connection()
+    avg = pd.read_sql_query('''
+        SELECT s.name,
+               ROUND(AVG(s.primary_score), 1) as avg_primary
+        FROM students s
+        GROUP BY s.name
+        ORDER BY avg_primary DESC
+    ''', conn)
+    conn.close()
+    if avg.empty:
+        print("Нет данных.")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, max(4, len(avg) * 0.4)))
+    colors = ['#4472C4', '#ED7D31', '#70AD47', '#FFC000', '#5B9BD5', '#A5A5A5']
+    bar_colors = [colors[i % len(colors)] for i in range(len(avg))]
+    bars = ax.barh(avg['name'], avg['avg_primary'], color=bar_colors, edgecolor='white')
+    ax.set_xlabel('Средний первичный балл')
+    ax.set_title('Средний балл учеников')
+    ax.invert_yaxis()
+
+    for bar, val in zip(bars, avg['avg_primary']):
+        ax.text(bar.get_width() + 0.3, bar.get_y() + bar.get_height() / 2,
+                f'{val:.1f}', ha='left', va='center', fontsize=9)
+
+    fig.tight_layout()
+    save_path = os.path.join(FILES_DIR, 'chart_student_avg.png')
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"График сохранён: {save_path}")
+
+
+def _chart_student_task_analysis(plt):
+    conn = get_connection()
+    names = pd.read_sql_query(
+        'SELECT DISTINCT name FROM students ORDER BY name', conn
+    )
+    conn.close()
+    if names.empty:
+        print("Нет учеников.")
+        return
+
+    print("\nВыберите ученика:")
+    for i, row in names.iterrows():
+        print(f"{i + 1}) {row['name']}")
+    print("0) Отмена")
+
+    choice = input("> ").strip()
+    if not choice.isdigit():
+        return
+    idx = int(choice)
+    if idx == 0 or idx > len(names):
+        return
+
+    name = names.iloc[idx - 1]['name']
+
+    conn = get_connection()
+    stats = pd.read_sql_query('''
+        SELECT r.number as task_number,
+               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
+        FROM results r
+        JOIN students s ON r.student_id = s.id
+        WHERE s.name = ?
+        GROUP BY r.number
+        ORDER BY r.number ASC
+    ''', conn, params=(name,))
+    conn.close()
+    if stats.empty:
+        print(f"У ученика «{name}» нет данных о заданиях.")
+        return
+
+    stats = stats.astype({'task_number': int})
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    bars = ax.bar(stats['task_number'], stats['solve_rate'], color='#70AD47', edgecolor='white')
+    ax.set_xlabel('Номер задания')
+    ax.set_ylabel('% решаемости')
+    ax.set_title(f'Решаемость заданий — {name}')
+    ax.yaxis.set_major_formatter(PercentFormatter(decimals=0))
+    ax.set_xticks(stats['task_number'])
+    ax.set_ylim(0, 105)
+
+    for bar, rate in zip(bars, stats['solve_rate']):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                f'{rate:.0f}%', ha='center', va='bottom', fontsize=8)
+
+    fig.tight_layout()
+    save_path = os.path.join(FILES_DIR, 'chart_student_tasks.png')
+    fig.savefig(save_path, dpi=150)
+    plt.close(fig)
+    print(f"График сохранён: {save_path}")
+
+
 def main():
     while True:
         print()
@@ -544,6 +709,8 @@ def main():
         print("8) Статистика по заданиям")
         print("9) Средний балл учеников")
         print("10) Анализ заданий ученика")
+        print("--- Графики ---")
+        print("11) Построить графики")
         print("0) Выход")
 
         choice = input("> ").strip()
@@ -568,6 +735,8 @@ def main():
             student_avg()
         elif choice == '10':
             student_task_analysis()
+        elif choice == '11':
+            show_charts()
         elif choice == '0':
             break
         else:

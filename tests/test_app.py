@@ -449,3 +449,79 @@ def test_task_stats_empty(schema):
     ''', conn)
     assert df.empty
     conn.close()
+
+
+def test_chart_task_stats_creates_file(schema):
+    """Chart for task stats produces a PNG file."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    conn, cursor = schema
+    vid = menu.get_or_create_variant(cursor, 'v1', 1)
+    cursor.execute('''
+        INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
+        VALUES ('s1', 'Alice', ?, 2, 50)
+    ''', (vid,))
+    cursor.executemany('''
+        INSERT INTO results (student_id, key, score, number, task_id)
+        VALUES (?, ?, ?, ?, ?)
+    ''', [
+        ('s1', 'k1', 1, 1, 101),
+        ('s1', 'k2', 0, 2, 102),
+    ])
+    conn.commit()
+
+    stats = pd.read_sql_query('''
+        SELECT r.number as task_number,
+               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
+        FROM results r
+        GROUP BY r.number
+        ORDER BY r.number
+    ''', conn)
+    conn.close()
+    assert not stats.empty
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+        temp_path = f.name
+
+    fig, ax = plt.subplots()
+    ax.bar(stats['task_number'], stats['solve_rate'])
+    fig.savefig(temp_path, dpi=50)
+    plt.close(fig)
+    assert os.path.getsize(temp_path) > 0
+    os.unlink(temp_path)
+
+
+def test_chart_student_avg_creates_file(schema):
+    """Chart for student averages produces a PNG file."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    conn, cursor = schema
+    vid = menu.get_or_create_variant(cursor, 'v1', 1)
+    cursor.execute('''
+        INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
+        VALUES ('s1', 'Alice', ?, 10, 50), ('s2', 'Bob', ?, 20, 80)
+    ''', (vid, vid))
+    conn.commit()
+
+    avg = pd.read_sql_query('''
+        SELECT s.name, ROUND(AVG(s.primary_score), 1) as avg_primary
+        FROM students s
+        GROUP BY s.name
+    ''', conn)
+    conn.close()
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+        temp_path = f.name
+
+    fig, ax = plt.subplots()
+    ax.barh(avg['name'], avg['avg_primary'])
+    fig.savefig(temp_path, dpi=50)
+    plt.close(fig)
+    assert os.path.getsize(temp_path) > 0
+    os.unlink(temp_path)
