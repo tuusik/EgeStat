@@ -413,12 +413,10 @@ def task_stats():
     conn = get_connection()
     stats = pd.read_sql_query('''
         SELECT r.number as task_number,
-               COUNT(*) as attempts,
-               SUM(r.score) as solves,
                ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
         FROM results r
         GROUP BY r.number
-        ORDER BY solve_rate ASC
+        ORDER BY r.number ASC
     ''', conn)
 
     conn.close()
@@ -427,11 +425,22 @@ def task_stats():
         print("Нет данных.")
         return
 
-    stats = stats.astype({'task_number': int, 'attempts': int, 'solves': int})
+    stats = stats.astype({'task_number': int})
 
+    print("\nСортировать по:")
+    print("1) Номеру задания")
+    print("2) % решаемости (от худших к лучшим)")
+    print("3) % решаемости (от лучших к худшим)")
+    choice = input("> ").strip()
+
+    if choice == '2':
+        stats = stats.sort_values('solve_rate', ascending=True)
+    elif choice == '3':
+        stats = stats.sort_values('solve_rate', ascending=False)
+
+    stats.columns = ['№ задания', '% решаемости']
     print()
     print("Статистика по номерам заданий (все ученики):")
-    stats.columns = ['№ задания', 'Попыток', 'Решено', '% решаемости']
     print(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
 
 
@@ -487,8 +496,6 @@ def student_task_analysis():
     conn = get_connection()
     stats = pd.read_sql_query('''
         SELECT r.number as task_number,
-               COUNT(*) as attempts,
-               SUM(r.score) as solves,
                ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
         FROM results r
         JOIN students s ON r.student_id = s.id
@@ -502,10 +509,10 @@ def student_task_analysis():
         print(f"У ученика «{name}» нет данных о заданиях.")
         return
 
-    stats = stats.astype({'task_number': int, 'attempts': int, 'solves': int})
+    stats = stats.astype({'task_number': int})
 
     print(f"\nАнализ заданий для «{name}»:")
-    stats.columns = ['№ задания', 'Попыток', 'Решено', '% решаемости']
+    stats.columns = ['№ задания', '% решаемости']
     print(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
 
 
