@@ -333,7 +333,7 @@ def export_pdf():
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
     conn = get_connection()
     students = pd.read_sql_query('''
@@ -368,26 +368,24 @@ def export_pdf():
     style_normal = styles['Normal']
     style_normal.fontName = 'ArialUnicode'
 
-    # Build table data
-    headers = ['Имя'] + [str(c) for c in pivot.columns]
-    data = [headers]
-    for name, row in pivot.iterrows():
-        data.append([name] + [str(v) for v in row.values])
-
-    # Column widths — dynamic based on content
-    char_w = 0.7  # mm per char at 6pt
-    col_widths = [max(35, min(65, max(len(n) for n in pivot.index) * char_w + 6))]
+    # Build table data — headers with Paragraph for wrapping
+    header_style = ParagraphStyle('Header', fontName='ArialUnicode', fontSize=5, alignment=1, leading=6)
+    data = [[Paragraph('Имя', header_style)]]
     for col in pivot.columns:
-        col_str = str(col)
-        max_val = max((len(str(v)) for v in pivot[col]), default=0)
-        longest = max(len(col_str), max_val)
-        col_widths.append(max(8, min(28, longest * char_w + 4)))
+        data[0].append(Paragraph(str(col), header_style))
+    for name, row in pivot.iterrows():
+        data.append([name, *[str(v) for v in row.values]])
 
-    col_widths = [w * mm for w in col_widths]
-    max_width = landscape(A4)[0] - 20 * mm
-    total_width = sum(col_widths)
-    if total_width > max_width:
-        col_widths = [w * max_width / total_width for w in col_widths]
+    n_cols = len(data[0])
+    # Column widths based on data only (headers wrap via Paragraph)
+    name_width = max(30, min(55, max(len(n) for n in pivot.index) * 0.65 + 6)) * mm
+    data_col_width = max(6, min(12, 0.65 * 3 + 2)) * mm  # numbers are 1-3 chars
+
+    col_widths = [name_width] + [data_col_width] * (n_cols - 1)
+    page_width = landscape(A4)[0] - 20 * mm
+    if sum(col_widths) > page_width:
+        data_col_width = (page_width - name_width) / (n_cols - 1)
+        col_widths = [name_width] + [data_col_width] * (n_cols - 1)
 
     pdf_path = os.path.join(FILES_DIR, 'results.pdf')
     doc = SimpleDocTemplate(
