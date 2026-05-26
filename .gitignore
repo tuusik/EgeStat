@@ -6,3 +6,4 @@ C:\\selenium_profile1/
 __pycache__/
 *.pyc
 EgeStat_environment/
+ege_stat.db
