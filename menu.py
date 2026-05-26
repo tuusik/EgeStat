@@ -35,14 +35,14 @@ def show_results():
     value_col = 'secondary_score' if choice == '2' else 'primary_score'
 
     pivot = students.pivot_table(
-        index='name', columns='variant_name', values=value_col,
+        index='variant_name', columns='name', values=value_col,
         aggfunc='max'
     )
     pivot = pivot.astype('Int64').map(lambda x: int(x) if pd.notna(x) else '-')
 
-    pivot.index.name = 'Имя'
+    pivot.index.name = 'Тест'
     click.echo()
-    click.echo_via_pager(tabulate(pivot, headers='keys', tablefmt='grid'))
+    click.echo(tabulate(pivot, headers='keys', tablefmt='grid'))
 
 
 @cli.command("delete-test")
