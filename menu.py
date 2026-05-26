@@ -30,7 +30,7 @@ def show_results():
     click.echo("\nФормат отображения:")
     click.echo("1) Первичные баллы")
     click.echo("2) Вторичные баллы")
-    choice = click.prompt(">", type=click.Choice(['1', '2']))
+    choice = input("> ").strip()
 
     value_col = 'secondary_score' if choice == '2' else 'primary_score'
 
