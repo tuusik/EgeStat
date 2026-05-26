@@ -216,10 +216,18 @@ def export_pdf():
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
     from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image
+    )
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.lib.styles import getSampleStyleSheet
+    from io import BytesIO
+
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager
 
     db = Database()
     with db:
@@ -245,9 +253,16 @@ def export_pdf():
     font_path = '/Library/Fonts/Arial Unicode.ttf'
     pdfmetrics.registerFont(TTFont('ArialUnicode', font_path))
 
+    if os.path.exists(font_path):
+        font_manager.fontManager.addfont(font_path)
+        plt.rcParams['font.family'] = font_manager.FontProperties(fname=font_path).get_name()
+    plt.rcParams['axes.unicode_minus'] = False
+
     styles = getSampleStyleSheet()
     style_normal = styles['Normal']
     style_normal.fontName = 'ArialUnicode'
+    style_heading = styles['Heading2']
+    style_heading.fontName = 'ArialUnicode'
 
     n_cols = len(pivot.columns) + 1
     data = [['Имя'] + [str(i) for i in range(1, n_cols)]]
@@ -283,7 +298,68 @@ def export_pdf():
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#D9E2F3')]),
     ]))
 
-    elems = [Paragraph("Результаты тестов", style_normal), Spacer(1, 5 * mm), table]
+    # ---- charts ----
+    chart_width = 220 * mm
+    chart_height = 110 * mm
+
+    # Task stats chart
+    with db:
+        task_df = db.get_task_stats()
+    buf1 = BytesIO()
+    if not task_df.empty:
+        task_df = task_df.astype({'task_number': int})
+        fig, ax = plt.subplots(figsize=(10, 4.5))
+        bars = ax.bar(task_df['task_number'], task_df['solve_rate'], color='#4472C4', edgecolor='white')
+        ax.set_xlabel('Номер задания')
+        ax.set_ylabel('% решаемости')
+        ax.set_title('Решаемость заданий (все ученики)')
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}%'))
+        ax.set_xticks(task_df['task_number'])
+        ax.set_ylim(0, 105)
+        for bar, rate in zip(bars, task_df['solve_rate']):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                    f'{rate:.0f}%', ha='center', va='bottom', fontsize=7)
+        fig.tight_layout()
+        fig.savefig(buf1, format='png', dpi=150)
+        plt.close(fig)
+    buf1.seek(0)
+
+    # Student avg chart
+    with db:
+        avg_df = db.get_student_avg()
+    buf2 = BytesIO()
+    if not avg_df.empty:
+        fig, ax = plt.subplots(figsize=(10, max(3, len(avg_df) * 0.35)))
+        colors_list = ['#4472C4', '#ED7D31', '#70AD47', '#FFC000', '#5B9BD5', '#A5A5A5']
+        bar_colors = [colors_list[i % len(colors_list)] for i in range(len(avg_df))]
+        bars = ax.barh(avg_df['name'], avg_df['avg_primary'], color=bar_colors, edgecolor='white')
+        ax.set_xlabel('Средний первичный балл')
+        ax.set_title('Средний балл учеников')
+        ax.invert_yaxis()
+        for bar, val in zip(bars, avg_df['avg_primary']):
+            ax.text(bar.get_width() + 0.3, bar.get_y() + bar.get_height() / 2,
+                    f'{val:.1f}', ha='left', va='center', fontsize=8)
+        fig.tight_layout()
+        fig.savefig(buf2, format='png', dpi=150)
+        plt.close(fig)
+    buf2.seek(0)
+
+    elems = [
+        Paragraph("Результаты тестов", style_normal),
+        Spacer(1, 5 * mm),
+        table,
+    ]
+    if buf1.getbuffer().nbytes > 0:
+        elems.append(PageBreak())
+        elems.append(Paragraph("Статистика по заданиям", style_heading))
+        elems.append(Spacer(1, 3 * mm))
+        elems.append(Image(buf1, width=chart_width, height=chart_height))
+    if buf2.getbuffer().nbytes > 0:
+        elems.append(PageBreak())
+        elems.append(Paragraph("Средний балл учеников", style_heading))
+        elems.append(Spacer(1, 3 * mm))
+        elems.append(Image(buf2, width=chart_width, height=chart_height))
+
     doc.build(elems)
     print(f"PDF сохранён: {pdf_path}")
 
