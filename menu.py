@@ -333,7 +333,7 @@ def export_pdf():
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.styles import getSampleStyleSheet
 
     conn = get_connection()
     students = pd.read_sql_query('''
@@ -368,18 +368,15 @@ def export_pdf():
     style_normal = styles['Normal']
     style_normal.fontName = 'ArialUnicode'
 
-    # Build table data — headers with Paragraph for wrapping
-    header_style = ParagraphStyle('Header', fontName='ArialUnicode', fontSize=5, alignment=1, leading=6)
-    data = [[Paragraph('Имя', header_style)]]
-    for col in pivot.columns:
-        data[0].append(Paragraph(str(col), header_style))
+    # Build table data — headers are just numbers
+    n_cols = len(pivot.columns) + 1
+    data = [['Имя'] + [str(i) for i in range(1, n_cols)]]
     for name, row in pivot.iterrows():
         data.append([name, *[str(v) for v in row.values]])
 
-    n_cols = len(data[0])
-    # Column widths based on data only (headers wrap via Paragraph)
+    # Column widths
     name_width = max(30, min(55, max(len(n) for n in pivot.index) * 0.65 + 6)) * mm
-    data_col_width = max(6, min(12, 0.65 * 3 + 2)) * mm  # numbers are 1-3 chars
+    data_col_width = 8 * mm  # fixed narrow width for numbers
 
     col_widths = [name_width] + [data_col_width] * (n_cols - 1)
     page_width = landscape(A4)[0] - 20 * mm
