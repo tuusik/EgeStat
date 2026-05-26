@@ -3,6 +3,7 @@ selenium_profile/
 C:\\selenium_profile/
 C:\\selenium_profile1/
 .idea/
+.pytest_cache/
 __pycache__/
 *.pyc
 EgeStat_environment/
