@@ -109,6 +109,12 @@ def load_file(conn, cursor, filename):
 def main():
     conn, cursor = init_db()
 
+    cursor.execute('SELECT COUNT(*) FROM variants')
+    if cursor.fetchone()[0] > 0:
+        print("База уже содержит данные. Используй пункт меню «Загрузить новые файлы».")
+        conn.close()
+        return
+
     json_files = sorted(
         f for f in os.listdir(FILES_DIR) if f.endswith('.json')
     )

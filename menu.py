@@ -1,9 +1,13 @@
+import json
 import os
+import re
 import sqlite3
 import pandas as pd
 from tabulate import tabulate
+from tqdm import tqdm
 
 DB_PATH = os.path.join(os.getcwd(), 'ege_stat.db')
+FILES_DIR = os.path.join(os.getcwd(), 'files')
 
 
 def get_connection():
@@ -250,6 +254,78 @@ def delete_student():
     print(f"Ученик «{name}» удалён.")
 
 
+def get_or_create_variant(cursor, name, kim):
+    cursor.execute('SELECT id FROM variants WHERE name = ?', (name,))
+    row = cursor.fetchone()
+    if row:
+        return row[0]
+    cursor.execute(
+        'INSERT INTO variants (name, kim) VALUES (?, ?)',
+        (name, kim)
+    )
+    return cursor.lastrowid
+
+
+def load_new_files():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT name FROM variants')
+    existing = {r[0] for r in cursor.fetchall()}
+
+    json_files = sorted(
+        f for f in os.listdir(FILES_DIR) if f.endswith('.json')
+    )
+    new_files = [f for f in json_files if re.sub(r'\.json$', '', f) not in existing]
+
+    if not new_files:
+        print("Новых файлов нет.")
+        conn.close()
+        return
+
+    for filename in tqdm(new_files, desc="Загрузка новых файлов", unit="файл"):
+        filepath = os.path.join(FILES_DIR, filename)
+        variant_name = re.sub(r'\.json$', '', filename)
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            records = json.load(f)
+
+        if not records:
+            continue
+
+        kim = records[0].get('kim')
+        variant_id = get_or_create_variant(cursor, variant_name, kim)
+
+        for rec in records:
+            cursor.execute('''
+                INSERT OR IGNORE INTO students
+                    (id, name, user_id, variant_id, primary_score,
+                     secondary_score, duration, hide, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                rec['id'], rec['name'], rec.get('user_id'), variant_id,
+                rec.get('primaryScore'), rec.get('secondaryScore'),
+                rec.get('duration'),
+                1 if rec.get('hide') else 0,
+                rec.get('createdAt'), rec.get('updatedAt')
+            ))
+
+            for r in rec.get('result', []):
+                cursor.execute('''
+                    INSERT INTO results
+                        (student_id, key, score, answer, number, task_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    rec['id'], r.get('key'), r.get('score'),
+                    r.get('answer'), r.get('number'), r.get('taskId')
+                ))
+
+        conn.commit()
+
+    conn.close()
+    print(f"Загружено {len(new_files)} новых файлов.")
+
+
 def main():
     while True:
         print()
@@ -261,6 +337,7 @@ def main():
         print("3) Удалить ученика")
         print("4) Переименовать ученика")
         print("5) Переименовать тест")
+        print("6) Загрузить новые файлы")
         print("0) Выход")
 
         choice = input("> ").strip()
@@ -275,6 +352,8 @@ def main():
             rename_student()
         elif choice == '5':
             rename_test()
+        elif choice == '6':
+            load_new_files()
         elif choice == '0':
             break
         else:
