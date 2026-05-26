@@ -324,3 +324,128 @@ def test_get_or_create_variant_kim_none(schema):
     vid = menu.get_or_create_variant(cursor, 'no_kim', None)
     cursor.execute('SELECT kim FROM variants WHERE id = ?', (vid,))
     assert cursor.fetchone()[0] is None
+
+
+def test_task_stats_query(schema):
+    """Task statistics grouped by number returns correct rates."""
+    conn, cursor = schema
+    v1 = menu.get_or_create_variant(cursor, 'v1', 1)
+    v2 = menu.get_or_create_variant(cursor, 'v2', 1)
+
+    # Student 1 with 2 tasks
+    cursor.execute('''
+        INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
+        VALUES ('s1', 'Alice', ?, 2, 50)
+    ''', (v1,))
+    cursor.executemany('''
+        INSERT INTO results (student_id, key, score, number, task_id)
+        VALUES (?, ?, ?, ?, ?)
+    ''', [
+        ('s1', 'k1', 1, 1, 101),
+        ('s1', 'k2', 1, 2, 102),
+        ('s1', 'k3', 0, 3, 103),
+        ('s1', 'k4', 0, 3, 104),
+    ])
+    conn.commit()
+
+    df = pd.read_sql_query('''
+        SELECT r.number as task_number,
+               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
+        FROM results r
+        GROUP BY r.number
+        ORDER BY r.number
+    ''', conn)
+
+    assert len(df) == 3
+    assert df[df['task_number'] == 1]['solve_rate'].iloc[0] == 100.0
+    assert df[df['task_number'] == 2]['solve_rate'].iloc[0] == 100.0
+    assert df[df['task_number'] == 3]['solve_rate'].iloc[0] == 0.0
+
+    conn.close()
+
+
+def test_student_avg_query(schema):
+    """Average scores per student are calculated correctly."""
+    conn, cursor = schema
+    v1 = menu.get_or_create_variant(cursor, 'v1', 1)
+    v2 = menu.get_or_create_variant(cursor, 'v2', 1)
+
+    cursor.execute('''
+        INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
+        VALUES
+            ('a1', 'Alice', ?, 10, 50),
+            ('a2', 'Alice', ?, 20, 80),
+            ('b1', 'Bob', ?, 15, 60)
+    ''', (v1, v2, v1))
+    conn.commit()
+
+    df = pd.read_sql_query('''
+        SELECT s.name,
+               ROUND(AVG(s.primary_score), 1) as avg_primary,
+               COUNT(*) as tests_count
+        FROM students s
+        GROUP BY s.name
+        ORDER BY s.name
+    ''', conn)
+
+    assert len(df) == 2
+    alice = df[df['name'] == 'Alice'].iloc[0]
+    assert alice['avg_primary'] == 15.0
+    assert alice['tests_count'] == 2
+
+    bob = df[df['name'] == 'Bob'].iloc[0]
+    assert bob['avg_primary'] == 15.0
+    assert bob['tests_count'] == 1
+
+    conn.close()
+
+
+def test_student_task_analysis_query(schema):
+    """Per-student task analysis returns only that student's data."""
+    conn, cursor = schema
+    vid = menu.get_or_create_variant(cursor, 'v1', 1)
+
+    cursor.execute('''
+        INSERT INTO students (id, name, variant_id, primary_score, secondary_score)
+        VALUES ('s1', 'Alice', ?, 2, 50), ('s2', 'Bob', ?, 1, 25)
+    ''', (vid, vid))
+
+    cursor.executemany('''
+        INSERT INTO results (student_id, key, score, number, task_id)
+        VALUES (?, ?, ?, ?, ?)
+    ''', [
+        ('s1', 'k1', 1, 1, 101),
+        ('s1', 'k2', 0, 2, 102),
+        ('s2', 'k3', 1, 1, 101),
+        ('s2', 'k4', 0, 2, 102),
+    ])
+    conn.commit()
+
+    df = pd.read_sql_query('''
+        SELECT r.number as task_number,
+               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
+        FROM results r
+        JOIN students s ON r.student_id = s.id
+        WHERE s.name = ?
+        GROUP BY r.number
+        ORDER BY r.number
+    ''', conn, params=('Alice',))
+
+    assert len(df) == 2
+    assert df[df['task_number'] == 1]['solve_rate'].iloc[0] == 100.0
+    assert df[df['task_number'] == 2]['solve_rate'].iloc[0] == 0.0
+
+    conn.close()
+
+
+def test_task_stats_empty(schema):
+    """Task stats on empty results returns empty DataFrame."""
+    conn, cursor = schema
+    df = pd.read_sql_query('''
+        SELECT r.number as task_number,
+               ROUND(CAST(SUM(r.score) AS FLOAT) / COUNT(*) * 100, 1) as solve_rate
+        FROM results r
+        GROUP BY r.number
+    ''', conn)
+    assert df.empty
+    conn.close()

@@ -511,6 +511,17 @@ def student_task_analysis():
 
     stats = stats.astype({'task_number': int})
 
+    print("\nСортировать по:")
+    print("1) Номеру задания")
+    print("2) % решаемости (от худших к лучшим)")
+    print("3) % решаемости (от лучших к худшим)")
+    choice = input("> ").strip()
+
+    if choice == '2':
+        stats = stats.sort_values('solve_rate', ascending=True)
+    elif choice == '3':
+        stats = stats.sort_values('solve_rate', ascending=False)
+
     print(f"\nАнализ заданий для «{name}»:")
     stats.columns = ['№ задания', '% решаемости']
     print(tabulate(stats, headers='keys', tablefmt='grid', showindex=False))
